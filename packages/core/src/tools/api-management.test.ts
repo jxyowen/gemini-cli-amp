@@ -122,7 +122,7 @@ describe('ApiManagementTool edit functionality', () => {
     );
   });
 
-  it('should return edit confirmation details for edit action', async () => {
+  it('should return edit confirmation details from shouldConfirmExecute', async () => {
     // Mock get_api call
     global.fetch = vi.fn().mockResolvedValueOnce({
       ok: true,
@@ -136,17 +136,18 @@ describe('ApiManagementTool edit functionality', () => {
     // Mock getResponseText to return the JSON string
     (getResponseText as any).mockReturnValue(JSON.stringify({ summary: 'Modified API' }));
 
-    const result = await tool.execute({
+    const confirmationResult = await tool.shouldConfirmExecute({
       action: 'edit',
       apiName: 'TestApi',
       changeDescription: '修改API描述'
     }, new AbortController().signal);
 
-    expect(result.returnDisplay).toHaveProperty('type', 'edit');
-    expect(result.returnDisplay).toHaveProperty('title', '确认API修改: TestApi');
-    expect(result.returnDisplay).toHaveProperty('fileName', 'TestApi-api.json');
-    expect(result.returnDisplay).toHaveProperty('fileDiff');
-    expect(result.returnDisplay).toHaveProperty('onConfirm');
+    expect(confirmationResult).not.toBe(false);
+    expect(confirmationResult).toHaveProperty('type', 'edit');
+    expect(confirmationResult).toHaveProperty('title', '确认API修改: TestApi');
+    expect(confirmationResult).toHaveProperty('fileName', 'TestApi-api.json');
+    expect(confirmationResult).toHaveProperty('fileDiff');
+    expect(confirmationResult).toHaveProperty('onConfirm');
   });
 
   it('should not require confirmation for getApi action', async () => {
@@ -158,14 +159,28 @@ describe('ApiManagementTool edit functionality', () => {
     expect(confirmationResult).toBe(false);
   });
 
-  it('should not require confirmation for editApi action', async () => {
+  it('should require confirmation for editApi action', async () => {
+    // Mock get_api call
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ summary: 'Test API' }),
+    } as any);
+
+    // Mock generateContent call
+    const mockResponse = { /* mock GenerateContentResponse */ };
+    (mockGeminiClient.generateContent as any).mockResolvedValue(mockResponse);
+    
+    // Mock getResponseText to return the JSON string
+    (getResponseText as any).mockReturnValue(JSON.stringify({ summary: 'Modified API' }));
+
     const confirmationResult = await tool.shouldConfirmExecute({
       action: 'edit',
       apiName: 'TestApi',
       changeDescription: '修改API描述'
     }, new AbortController().signal);
 
-    expect(confirmationResult).toBe(false);
+    expect(confirmationResult).not.toBe(false);
+    expect(confirmationResult).toHaveProperty('type', 'edit');
   });
 
   it('should require confirmation for publishApi action', async () => {
@@ -177,5 +192,55 @@ describe('ApiManagementTool edit functionality', () => {
     expect(confirmationResult).not.toBe(false);
     expect(confirmationResult).toHaveProperty('type', 'info');
     expect(confirmationResult).toHaveProperty('title', '确认API管理操作');
+  });
+
+  it('should execute edit action using cached result from shouldConfirmExecute', async () => {
+    // Mock get_api call
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ summary: 'Test API' }),
+      } as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ success: true }),
+      } as any);
+
+    // Mock generateContent call
+    const mockResponse = { /* mock GenerateContentResponse */ };
+    (mockGeminiClient.generateContent as any).mockResolvedValue(mockResponse);
+    
+    // Mock getResponseText to return the JSON string
+    (getResponseText as any).mockReturnValue(JSON.stringify({ summary: 'Modified API' }));
+
+    // First call shouldConfirmExecute to cache the result
+    await tool.shouldConfirmExecute({
+      action: 'edit',
+      apiName: 'TestApi',
+      changeDescription: '修改API描述'
+    }, new AbortController().signal);
+
+    // Then execute with the same parameters
+    const result = await tool.execute({
+      action: 'edit',
+      apiName: 'TestApi',
+      changeDescription: '修改API描述'
+    }, new AbortController().signal);
+
+    expect(result.returnDisplay).toContain('成功修改API: TestApi');
+    expect(result.returnDisplay).toContain('修改前后对比');
+    expect(result.llmContent).toContain('success');
+  });
+
+  it('should not require confirmation in AUTO_EDIT mode', async () => {
+    (mockConfig.getApprovalMode as any).mockReturnValue('auto_edit');
+
+    const confirmationResult = await tool.shouldConfirmExecute({
+      action: 'edit',
+      apiName: 'TestApi',
+      changeDescription: '修改API描述'
+    }, new AbortController().signal);
+
+    expect(confirmationResult).toBe(false);
   });
 }); 

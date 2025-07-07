@@ -14,7 +14,6 @@ import {
   ToolResult,
   ToolCallConfirmationDetails,
   ToolConfirmationOutcome,
-  ToolEditConfirmationDetails,
   FileDiff,
 } from './tools.js';
 import { getErrorMessage } from '../utils/errors.js';
@@ -120,9 +119,61 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
       return false;
     }
 
-    // getApi和editApi操作不需要人工确认
-    if (params.action === 'get' || params.action === 'edit') {
+    // 只有get操作不需要人工确认，edit和publish都需要确认
+    if (params.action === 'get') {
       return false;
+    }
+
+    // 对于edit操作，生成确认详情
+    if (params.action === 'edit') {
+      try {
+        // 预先计算edit结果用于展示diff
+        const editResult = await this.editApi(params.apiName, params.changeDescription!, signal);
+        
+        let beforeData: any;
+        let afterData: any;
+        
+        if (editResult.data && editResult.data.before && editResult.data.after) {
+          beforeData = editResult.data.before;
+          afterData = editResult.data.after;
+        } else if (editResult.before && editResult.after) {
+          beforeData = editResult.before;
+          afterData = editResult.after;
+        } else {
+          throw new Error('edit_api返回的数据格式不正确，缺少before或after字段');
+        }
+        
+        const fileName = `${params.apiName}-api.json`;
+        const beforeContent = JSON.stringify(beforeData, null, 2);
+        const afterContent = JSON.stringify(afterData, null, 2);
+        const fileDiff = Diff.createPatch(
+          fileName,
+          beforeContent,
+          afterContent,
+          'Before',
+          'After',
+          DEFAULT_DIFF_OPTIONS,
+        );
+
+        const confirmationDetails: ToolCallConfirmationDetails = {
+          type: 'info',
+          title: `确认API修改: ${params.apiName}`,
+          prompt: `即将修改API定义：\n\nAPI名称: ${params.apiName}\n修改描述: ${params.changeDescription}\n\n修改前后对比:\n${fileDiff}\n\n是否继续？`,
+          onConfirm: async (outcome: ToolConfirmationOutcome) => {
+            if (outcome === ToolConfirmationOutcome.ProceedAlways) {
+              this.config.setApprovalMode(ApprovalMode.AUTO_EDIT);
+            }
+          },
+        };
+        
+        // 将计算的结果缓存起来，避免在execute中重复计算
+        (this as any)._cachedEditResult = { beforeData, afterData, params };
+        
+        return confirmationDetails;
+      } catch (error) {
+        console.error(`准备API编辑确认时出错: ${getErrorMessage(error)}`);
+        return false;
+      }
     }
 
     const actionDescriptions = {
@@ -165,73 +216,41 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
           displayResult = `${displayMessage}\n\n${JSON.stringify(result, null, 2)}`;
           break;
         case 'edit':
-          // 执行API修改，获取包含before和after字段的结果
-          const editResult = await this.editApi(params.apiName, params.changeDescription!, signal);
-          
-          // 处理返回的数据结构，支持直接的before/after字段和嵌套在data中的字段
+          // 检查是否有缓存的编辑结果（来自shouldConfirmExecute）
+          const cachedResult = (this as any)._cachedEditResult;
           let beforeData: any;
           let afterData: any;
           
-          if (editResult.data && editResult.data.before && editResult.data.after) {
-            // 数据嵌套在data字段中
-            beforeData = editResult.data.before;
-            afterData = editResult.data.after;
-          } else if (editResult.before && editResult.after) {
-            // 数据直接在根级别
-            beforeData = editResult.before;
-            afterData = editResult.after;
+          if (cachedResult && cachedResult.params.apiName === params.apiName && 
+              cachedResult.params.changeDescription === params.changeDescription) {
+            // 使用缓存的结果
+            beforeData = cachedResult.beforeData;
+            afterData = cachedResult.afterData;
+            // 清除缓存
+            delete (this as any)._cachedEditResult;
           } else {
-            throw new Error('edit_api返回的数据格式不正确，缺少before或after字段');
+            // 如果没有缓存（比如自动批准模式），重新执行edit
+            const editResult = await this.editApi(params.apiName, params.changeDescription!, signal);
+            
+            if (editResult.data && editResult.data.before && editResult.data.after) {
+              beforeData = editResult.data.before;
+              afterData = editResult.data.after;
+            } else if (editResult.before && editResult.after) {
+              beforeData = editResult.before;
+              afterData = editResult.after;
+            } else {
+              throw new Error('edit_api返回的数据格式不正确，缺少before或after字段');
+            }
           }
           
-          // 生成diff显示用于二次确认
-          let fileDiff: string;
-          let fileName: string;
+          // 执行update操作
           try {
-            const beforeContent = JSON.stringify(beforeData, null, 2);
-            const afterContent = JSON.stringify(afterData, null, 2);
-            fileName = `${params.apiName}-api.json`;
-            fileDiff = Diff.createPatch(
-              fileName,
-              beforeContent,
-              afterContent,
-              'Before',
-              'After',
-              DEFAULT_DIFF_OPTIONS,
-            );
-          } catch (diffError) {
-            // 如果diff生成失败，使用JSON格式
-            console.warn('Diff生成失败，使用JSON格式显示:', getErrorMessage(diffError));
-            fileName = `${params.apiName}-api.json`;
-            const beforeContent = JSON.stringify(beforeData, null, 2);
-            const afterContent = JSON.stringify(afterData, null, 2);
-            fileDiff = `--- ${fileName} (Before)\n+++ ${fileName} (After)\n@@ -1,1 +1,1 @@\n-${beforeContent}\n+${afterContent}`;
+            result = await this.updateApi(params.apiName, JSON.stringify(afterData), signal);
+            displayMessage = `成功修改API: ${params.apiName}`;
+            displayResult = `${displayMessage}\n\n修改前后对比:\n\nBefore:\n${JSON.stringify(beforeData, null, 2)}\n\nAfter:\n${JSON.stringify(afterData, null, 2)}\n\n更新结果:\n${JSON.stringify(result, null, 2)}`;
+          } catch (updateError) {
+            throw new Error(`API更新失败: ${getErrorMessage(updateError)}`);
           }
-          
-          // 返回需要二次确认的编辑结果
-          return {
-            llmContent: JSON.stringify({ before: beforeData, after: afterData }, null, 2),
-            returnDisplay: {
-              type: 'edit',
-              title: `确认API修改: ${params.apiName}`,
-              fileName,
-              fileDiff,
-              onConfirm: async (outcome: ToolConfirmationOutcome) => {
-                if (outcome === ToolConfirmationOutcome.Cancel) {
-                  throw new Error('用户取消了API修改操作');
-                }
-                
-                // 用户确认后，自动执行update操作
-                try {
-                  const updateResult = await this.updateApi(params.apiName, JSON.stringify(afterData), signal);
-                  console.log(`API修改已确认并自动更新: ${params.apiName}`);
-                } catch (updateError) {
-                  console.error(`API更新失败: ${getErrorMessage(updateError)}`);
-                  throw new Error(`API修改确认成功，但更新失败: ${getErrorMessage(updateError)}`);
-                }
-              },
-            } as ToolEditConfirmationDetails,
-          };
           break;
         case 'publish':
           result = await this.publishApi(params.apiName, signal);
