@@ -31,10 +31,9 @@ const API_BASE_URL = 'http://127.0.0.1:7001';
  * 通用API管理工具参数
  */
 export interface ApiManagementToolParams {
-  action: 'get' | 'edit' | 'update' | 'publish';
+  action: 'get' | 'edit' | 'publish';
   apiName: string;
   changeDescription?: string;
-  apiMeta?: string;
 }
 
 /**
@@ -50,26 +49,18 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
     super(
       ApiManagementTool.Name,
       '镇元(阿里云) API 管理',
-      '本工具专用于管理镇元API、阿里云API等接口的全生命周期，包括API定义、设计、修改、发布、配置、网关、权限、认证、限流、监控等。\n\n【适用场景】\n- 用户提及"API管理"、"API定义"、"API设计"、"API修改"、"API发布"、"API网关"、"API配置"、"API权限"、"API认证"、"API安全"、"API文档"、"API测试"、"API监控"、"API变更"、"API参数"、"API接口"、"API规范"、"API集成"、"API同步"、"API异步"、"API版本"、"API升级"、"API下线"、"API上线"、"API流控"、"API限流"、"API熔断"、"API降级"、"API路由"、"API代理"、"API统计"、"API分析"、"API报告"、"API告警"、"API通知"、"API回调"、"API事件"、"API触发器"、"API工作流"、"API编排"、"API集成"、"API连接"、"API同步"、"API异步"、"API批量"、"API实时"、"API离线"、"API在线"、"API状态"、"API健康"、"API可用性"、"API性能"、"API延迟"、"API吞吐量"、"API并发"、"API负载"、"API扩展"、"API弹性"、"API自动"、"API手动"、"API定时"、"API计划"、"API策略"、"API规则"等。\n- 用户明确提及"镇元API"、"阿里云API"、"OpenAPI"、"API接口管理"、"API平台"、"API服务"、"API产品"、"API目录"、"API市场"等。\n- 用户希望对API进行结构、参数、权限、流控、发布、下线、升级、文档等非代码层面的管理和操作。\n\n【注意】\n- 当用户提及"API修改"、"API变更"时，优先理解为API元数据/接口定义/参数/权限/配置等的修改，而非代码实现。\n- 仅当用户明确要求"代码实现"、"代码生成"、"Controller"、"Service"等时，才考虑代码相关工具。',
+      '本工具专用于管理镇元API、阿里云API等接口的全生命周期，包括API修改、发布等。',
       {
         properties: {
           action: {
-            description: '要执行的操作类型：get（获取API）、edit（修改API）、update（更新API）、publish（发布API）',
+            description: '要执行的操作类型：get（获取API）、edit（修改API定义和参数）、publish（发布API）',
             type: 'string',
-            enum: ['get', 'edit', 'update', 'publish'],
+            enum: ['get', 'edit', 'publish'],
           },
           apiName: {
             description: '需要管理的API名称（如：CreateInstance、ListUsers 等）',
             type: 'string',
-          },
-          changeDescription: {
-            description: 'API修改时的变更描述（如：添加参数、修改权限、调整限流等，仅edit操作必填）',
-            type: 'string',
-          },
-          apiMeta: {
-            description: 'API元数据内容（仅update操作必填）',
-            type: 'string',
-          },
+          }
         },
         required: ['action', 'apiName'],
         type: 'object',
@@ -96,10 +87,6 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
       return "The 'changeDescription' parameter is required for edit action.";
     }
 
-    if (params.action === 'update' && (!params.apiMeta || params.apiMeta.trim() === '')) {
-      return "The 'apiMeta' parameter is required for update action.";
-    }
-
     return null;
   }
 
@@ -109,8 +96,6 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
         return `获取API定义: ${params.apiName}`;
       case 'edit':
         return `修改API定义: ${params.apiName} - ${params.changeDescription}`;
-      case 'update':
-        return `更新API定义: ${params.apiName}`;
       case 'publish':
         return `发布API到网关: ${params.apiName}`;
       default:
@@ -131,34 +116,19 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
       return false;
     }
 
+    // getApi和editApi操作不需要人工确认
+    if (params.action === 'get' || params.action === 'edit') {
+      return false;
+    }
+
     const actionDescriptions = {
-      get: '获取API定义',
-      edit: '修改API定义',
-      update: '更新API定义',
       publish: '发布API到网关'
     };
-
-    // 对于edit操作，提供更详细的确认信息
-    if (params.action === 'edit') {
-      return {
-        type: 'info',
-        title: `确认API修改: ${params.apiName}`,
-        prompt: `即将修改API定义：\n\nAPI名称: ${params.apiName}\n修改描述: ${params.changeDescription}\n\n修改后将显示详细的diff对比。\n\n是否继续？`,
-        onConfirm: async (outcome: ToolConfirmationOutcome) => {
-          if (outcome === ToolConfirmationOutcome.ProceedAlways) {
-            this.config.setApprovalMode(ApprovalMode.AUTO_EDIT);
-          }
-          if (outcome === ToolConfirmationOutcome.Cancel) {
-            throw new Error('用户取消了API修改操作');
-          }
-        },
-      };
-    }
 
     return {
       type: 'info',
       title: `确认API管理操作`,
-      prompt: `即将执行${actionDescriptions[params.action]}操作：\n\nAPI名称: ${params.apiName}\n${params.changeDescription ? `修改描述: ${params.changeDescription}\n` : ''}${params.apiMeta ? `API元数据: ${params.apiMeta}\n` : ''}\n是否继续？`,
+      prompt: `即将执行${actionDescriptions[params.action]}操作：\n\nAPI名称: ${params.apiName}\n${params.changeDescription ? `修改描述: ${params.changeDescription}\n` : ''}\n是否继续？`,
       onConfirm: async (outcome: ToolConfirmationOutcome) => {
         if (outcome === ToolConfirmationOutcome.Cancel) {
           throw new Error('用户取消了API管理操作');
@@ -246,16 +216,18 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
                 if (outcome === ToolConfirmationOutcome.Cancel) {
                   throw new Error('用户取消了API修改操作');
                 }
-                // 用户确认后，这里不执行update操作，而是让用户手动调用update
-                // 这样可以保持工具职责的单一性
+                
+                // 用户确认后，自动执行update操作
+                try {
+                  const updateResult = await this.updateApi(params.apiName, JSON.stringify(afterData), signal);
+                  console.log(`API修改已确认并自动更新: ${params.apiName}`);
+                } catch (updateError) {
+                  console.error(`API更新失败: ${getErrorMessage(updateError)}`);
+                  throw new Error(`API修改确认成功，但更新失败: ${getErrorMessage(updateError)}`);
+                }
               },
             } as ToolEditConfirmationDetails,
           };
-          break;
-        case 'update':
-          result = await this.updateApi(params.apiName, params.apiMeta!, signal);
-          displayMessage = `成功更新API定义: ${params.apiName}`;
-          displayResult = `${displayMessage}\n\n${JSON.stringify(result, null, 2)}`;
           break;
         case 'publish':
           result = await this.publishApi(params.apiName, signal);
@@ -397,9 +369,9 @@ ${changeDescription}
     }
   }
 
-  private async updateApi(apiName: string, apiMeta: string, signal: AbortSignal): Promise<any> {
-    const url = `${API_BASE_URL}/test/update_api`;
-    const params = new URLSearchParams({ apiName, apiMeta });
+  private async publishApi(apiName: string, signal: AbortSignal): Promise<any> {
+    const url = `${API_BASE_URL}/test/publish_api`;
+    const params = new URLSearchParams({ apiName });
     
     const response = await this.fetchWithTimeoutAndOptions(
       `${url}?${params.toString()}`,
@@ -419,8 +391,8 @@ ${changeDescription}
     return await response.json();
   }
 
-  private async publishApi(apiName: string, signal: AbortSignal): Promise<any> {
-    const url = `${API_BASE_URL}/test/publish_api`;
+  private async updateApi(apiName: string, updatedApiJson: string, signal: AbortSignal): Promise<any> {
+    const url = `${API_BASE_URL}/test/update_api`;
     const params = new URLSearchParams({ apiName });
     
     const response = await this.fetchWithTimeoutAndOptions(
@@ -430,6 +402,7 @@ ${changeDescription}
         headers: {
           'Content-Type': 'application/json',
         },
+        body: updatedApiJson,
         signal,
       }
     );

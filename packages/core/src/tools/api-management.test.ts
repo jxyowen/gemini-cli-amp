@@ -148,4 +148,34 @@ describe('ApiManagementTool edit functionality', () => {
     expect(result.returnDisplay).toHaveProperty('fileDiff');
     expect(result.returnDisplay).toHaveProperty('onConfirm');
   });
+
+  it('should not require confirmation for getApi action', async () => {
+    const confirmationResult = await tool.shouldConfirmExecute({
+      action: 'get',
+      apiName: 'TestApi'
+    }, new AbortController().signal);
+
+    expect(confirmationResult).toBe(false);
+  });
+
+  it('should not require confirmation for editApi action', async () => {
+    const confirmationResult = await tool.shouldConfirmExecute({
+      action: 'edit',
+      apiName: 'TestApi',
+      changeDescription: '修改API描述'
+    }, new AbortController().signal);
+
+    expect(confirmationResult).toBe(false);
+  });
+
+  it('should require confirmation for publishApi action', async () => {
+    const confirmationResult = await tool.shouldConfirmExecute({
+      action: 'publish',
+      apiName: 'TestApi'
+    }, new AbortController().signal);
+
+    expect(confirmationResult).not.toBe(false);
+    expect(confirmationResult).toHaveProperty('type', 'info');
+    expect(confirmationResult).toHaveProperty('title', '确认API管理操作');
+  });
 }); 
