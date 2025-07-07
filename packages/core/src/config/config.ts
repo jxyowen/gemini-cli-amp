@@ -27,6 +27,10 @@ import {
   GEMINI_CONFIG_DIR as GEMINI_DIR,
 } from '../tools/memoryTool.js';
 import { WebSearchTool } from '../tools/web-search.js';
+import { ApiManagementTool } from '../tools/api-management.js';
+import { ApiDesignTool } from '../tools/api-design.js';
+import { ApiImplementationTool } from '../tools/api-implementation.js';
+import { ApiPublishTool } from '../tools/api-publish.js';
 import { GeminiClient } from '../core/client.js';
 import { FileDiscoveryService } from '../services/fileDiscoveryService.js';
 import { GitService } from '../services/gitService.js';
@@ -499,6 +503,12 @@ export function createToolRegistry(config: Config): Promise<ToolRegistry> {
   registerCoreTool(ShellTool, config);
   registerCoreTool(MemoryTool);
   registerCoreTool(WebSearchTool, config);
+  
+  // API Lifecycle Management Tools
+  registerCoreTool(ApiManagementTool, config);
+  registerCoreTool(ApiDesignTool, config);
+  registerCoreTool(ApiImplementationTool, config);
+  registerCoreTool(ApiPublishTool, config);
   return (async () => {
     await registry.discoverTools();
     return registry;
