@@ -504,7 +504,7 @@ export function createToolRegistry(config: Config): Promise<ToolRegistry> {
   registerCoreTool(WebSearchTool, config);
   
   // API Lifecycle Management Tools
-  registerCoreTool(ApiManagementTool, config);
+  registerCoreTool(ApiManagementTool, config, config.getGeminiClient());
   registerCoreTool(ApiImplementationTool, config);
   registerCoreTool(ApiPublishTool, config);
   return (async () => {
