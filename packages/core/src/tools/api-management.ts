@@ -4,16 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import * as Diff from 'diff';
 import { SchemaValidator } from '../utils/schemaValidator.js';
 import {
   BaseTool,
   ToolResult,
   ToolCallConfirmationDetails,
   ToolConfirmationOutcome,
+  ToolEditConfirmationDetails,
+  FileDiff,
 } from './tools.js';
 import { getErrorMessage } from '../utils/errors.js';
 import { Config, ApprovalMode } from '../config/config.js';
 import { fetchWithTimeout } from '../utils/fetch.js';
+import { DEFAULT_DIFF_OPTIONS } from './diffOptions.js';
 
 const API_TIMEOUT_MS = 10000;
 const API_BASE_URL = 'http://127.0.0.1:7001';
@@ -108,6 +112,7 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
 
   async shouldConfirmExecute(
     params: ApiManagementToolParams,
+    signal: AbortSignal,
   ): Promise<ToolCallConfirmationDetails | false> {
     if (this.config.getApprovalMode() === ApprovalMode.AUTO_EDIT) {
       return false;
@@ -124,6 +129,23 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
       update: '更新API定义',
       publish: '发布API到网关'
     };
+
+    // 对于edit操作，提供更详细的确认信息
+    if (params.action === 'edit') {
+      return {
+        type: 'info',
+        title: `确认API修改: ${params.apiName}`,
+        prompt: `即将修改API定义：\n\nAPI名称: ${params.apiName}\n修改描述: ${params.changeDescription}\n\n修改后将显示详细的diff对比。\n\n是否继续？`,
+        onConfirm: async (outcome: ToolConfirmationOutcome) => {
+          if (outcome === ToolConfirmationOutcome.ProceedAlways) {
+            this.config.setApprovalMode(ApprovalMode.AUTO_EDIT);
+          }
+          if (outcome === ToolConfirmationOutcome.Cancel) {
+            throw new Error('用户取消了API修改操作');
+          }
+        },
+      };
+    }
 
     return {
       type: 'info',
@@ -152,23 +174,90 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
     try {
       let result: any;
       let displayMessage: string;
+      let displayResult: string | FileDiff;
 
       switch (params.action) {
         case 'get':
           result = await this.getApi(params.apiName, signal);
           displayMessage = `成功获取API定义: ${params.apiName}`;
+          displayResult = `${displayMessage}\n\n${JSON.stringify(result, null, 2)}`;
           break;
         case 'edit':
-          result = await this.editApi(params.apiName, params.changeDescription!, signal);
-          displayMessage = `成功修改API定义: ${params.apiName}`;
+          try {
+            // 执行API修改，获取包含before和after字段的结果
+            const editResult = await this.editApi(params.apiName, params.changeDescription!, signal);
+            
+            // 处理返回的数据结构，支持直接的before/after字段和嵌套在data中的字段
+            let beforeData: any;
+            let afterData: any;
+            
+            if (editResult.data && editResult.data.before && editResult.data.after) {
+              // 数据嵌套在data字段中
+              beforeData = editResult.data.before;
+              afterData = editResult.data.after;
+            } else if (editResult.before && editResult.after) {
+              // 数据直接在根级别
+              beforeData = editResult.before;
+              afterData = editResult.after;
+            } else {
+              throw new Error('edit_api返回的数据格式不正确，缺少before或after字段');
+            }
+            
+            // 使用after字段的内容调用update接口来持久化修改
+            const updateResult = await this.updateApi(params.apiName, JSON.stringify(afterData), signal);
+            
+            // 使用update的结果作为最终结果
+            result = updateResult;
+            displayMessage = `成功修改并更新API定义: ${params.apiName}`;
+            
+            // 使用before和after字段生成diff显示
+            const beforeContent = JSON.stringify(beforeData, null, 2);
+            const afterContent = JSON.stringify(afterData, null, 2);
+            const fileName = `${params.apiName}-api.json`;
+            const fileDiff = Diff.createPatch(
+              fileName,
+              beforeContent,
+              afterContent,
+              'Before',
+              'After',
+              DEFAULT_DIFF_OPTIONS,
+            );
+            
+            displayResult = { fileDiff, fileName };
+          } catch (error) {
+            // 如果获取diff失败，仍然尝试执行edit和update操作，但不显示diff
+            try {
+              const editResult = await this.editApi(params.apiName, params.changeDescription!, signal);
+              
+              // 处理返回的数据结构
+              let afterData: any;
+              if (editResult.data && editResult.data.after) {
+                afterData = editResult.data.after;
+              } else if (editResult.after) {
+                afterData = editResult.after;
+              } else {
+                throw new Error('edit_api返回的数据格式不正确，缺少after字段');
+              }
+              
+              const updateResult = await this.updateApi(params.apiName, JSON.stringify(afterData), signal);
+              result = updateResult;
+              displayMessage = `成功修改并更新API定义: ${params.apiName}`;
+              displayResult = `${displayMessage}\n\n${JSON.stringify(result, null, 2)}`;
+            } catch (editError) {
+              // 如果edit操作也失败，抛出原始错误
+              throw error;
+            }
+          }
           break;
         case 'update':
           result = await this.updateApi(params.apiName, params.apiMeta!, signal);
           displayMessage = `成功更新API定义: ${params.apiName}`;
+          displayResult = `${displayMessage}\n\n${JSON.stringify(result, null, 2)}`;
           break;
         case 'publish':
           result = await this.publishApi(params.apiName, signal);
           displayMessage = `成功发布API到网关: ${params.apiName}`;
+          displayResult = `${displayMessage}\n\n${JSON.stringify(result, null, 2)}`;
           break;
         default:
           throw new Error(`不支持的操作: ${params.action}`);
@@ -176,7 +265,7 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
 
       return {
         llmContent: JSON.stringify(result, null, 2),
-        returnDisplay: `${displayMessage}\n\n${JSON.stringify(result, null, 2)}`,
+        returnDisplay: displayResult,
       };
     } catch (error) {
       const errorMessage = getErrorMessage(error);
