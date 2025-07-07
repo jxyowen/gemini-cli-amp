@@ -60,6 +60,10 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
           apiName: {
             description: '需要管理的API名称（如：CreateInstance、ListUsers 等）',
             type: 'string',
+          },
+          changeDescription: {
+            description: '修改描述，用于edit操作时描述需要进行的具体修改',
+            type: 'string',
           }
         },
         required: ['action', 'apiName'],
