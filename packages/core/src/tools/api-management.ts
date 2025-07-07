@@ -303,9 +303,17 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
+    // 从环境变量获取token并添加到headers中
+    const ampToken = process.env.AMP_CLI_TOKEN;
+    const headers = {
+      ...options.headers,
+      ...(ampToken && { 'amp_plugin_token': ampToken })
+    };
+
     try {
       const response = await fetch(url, {
         ...options,
+        headers,
         signal: options.signal || controller.signal,
       });
       return response;
