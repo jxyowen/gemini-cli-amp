@@ -28,7 +28,6 @@ import {
 } from '../tools/memoryTool.js';
 import { WebSearchTool } from '../tools/web-search.js';
 import { ApiManagementTool } from '../tools/api-management.js';
-import { ApiDesignTool } from '../tools/api-design.js';
 import { ApiImplementationTool } from '../tools/api-implementation.js';
 import { ApiPublishTool } from '../tools/api-publish.js';
 import { GeminiClient } from '../core/client.js';
@@ -506,7 +505,6 @@ export function createToolRegistry(config: Config): Promise<ToolRegistry> {
   
   // API Lifecycle Management Tools
   registerCoreTool(ApiManagementTool, config);
-  registerCoreTool(ApiDesignTool, config);
   registerCoreTool(ApiImplementationTool, config);
   registerCoreTool(ApiPublishTool, config);
   return (async () => {

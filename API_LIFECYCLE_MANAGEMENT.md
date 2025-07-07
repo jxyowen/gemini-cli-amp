@@ -6,18 +6,18 @@
 
 API全生命周期管理涵盖以下三大核心环节：
 
-1. **API设计** - 通过自然语言修改API定义，支持diff对比和用户确认
+1. **API设计** - 通过api_management工具的edit操作进行自然语言修改API定义
 2. **API实现** - 根据API定义生成对应的Controller代码，复用现有代码生成能力
 3. **API发布** - 将API定义发布到API网关使其生效
 
 ## 新增工具
 
 ### 1. API管理工具 (api_management)
-基础API管理工具，提供与后端API的HTTP通信功能。
+基础API管理工具，提供与后端API的HTTP通信功能，包含API设计功能。
 
 **功能：**
 - 获取API定义 (get)
-- 修改API定义 (edit) 
+- 修改API定义 (edit) - 支持自然语言描述修改API，返回修改前后的diff
 - 更新API定义 (update)
 - 发布API (publish)
 
@@ -27,19 +27,7 @@ API全生命周期管理涵盖以下三大核心环节：
 - `changeDescription`: 修改描述 (edit操作必需)
 - `apiMeta`: API元数据 (update操作必需)
 
-### 2. API设计工具 (api_design)
-专门用于API设计的工具，支持自然语言修改API定义并提供diff确认功能。
-
-**功能：**
-- 通过自然语言描述修改API定义
-- 显示修改前后的diff对比
-- 要求用户确认后才进行更新
-
-**参数：**
-- `apiName`: API名称
-- `changeDescription`: 自然语言修改描述
-
-### 3. API实现工具 (api_implementation)
+### 2. API实现工具 (api_implementation)
 根据API定义生成Controller代码，支持多种语言和框架。
 
 **功能：**
@@ -54,7 +42,7 @@ API全生命周期管理涵盖以下三大核心环节：
 - `language`: 编程语言 (可选，支持自动检测)
 - `framework`: 框架 (可选，支持自动选择)
 
-### 4. API发布工具 (api_publish)
+### 3. API发布工具 (api_publish)
 将API定义发布到API网关。
 
 **功能：**
@@ -96,7 +84,7 @@ POST /test/publish_api?apiName={apiName}
 
 ### 1. 设计API
 ```
-使用api_design工具修改用户管理API，添加用户头像字段
+使用api_management工具修改用户管理API：编辑API添加用户头像字段
 ```
 
 ### 2. 实现API
@@ -117,7 +105,6 @@ POST /test/publish_api?apiName={apiName}
 ### 工具注册
 在`packages/core/src/config/config.ts`中注册了所有新的API管理工具：
 - ApiManagementTool
-- ApiDesignTool
 - ApiImplementationTool
 - ApiPublishTool
 
@@ -134,8 +121,7 @@ POST /test/publish_api?apiName={apiName}
 
 ```
 packages/core/src/tools/
-├── api-management.ts      # 基础API管理工具
-├── api-design.ts          # API设计工具
+├── api-management.ts      # 基础API管理工具（包含API设计功能）
 ├── api-implementation.ts  # API实现工具
 └── api-publish.ts         # API发布工具
 ```
