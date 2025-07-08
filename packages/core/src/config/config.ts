@@ -521,7 +521,7 @@ export class Config {
     registerCoreTool(WebSearchTool, this);
 
     // API Lifecycle Management Tools
-    registerCoreTool(ApiManagementTool, this, this.getGeminiClient());
+    registerCoreTool(ApiManagementTool, this);
     registerCoreTool(ApiImplementationTool, this);
     registerCoreTool(ApiPublishTool, this);
 

@@ -77,14 +77,9 @@ export class ApiImplementationTool extends BaseTool<ApiImplementationToolParams,
   }
 
   validateToolParams(params: ApiImplementationToolParams): string | null {
-    if (
-      this.schema.parameters &&
-      !SchemaValidator.validate(
-        this.schema.parameters as Record<string, unknown>,
-        params,
-      )
-    ) {
-      return 'Parameters failed schema validation.';
+    const errors = SchemaValidator.validate(this.schema.parameters, params);
+    if (errors) {
+      return errors;
     }
 
     if (!params.apiName || params.apiName.trim() === '') {

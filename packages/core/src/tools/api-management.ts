@@ -20,7 +20,6 @@ import { getErrorMessage } from '../utils/errors.js';
 import { Config, ApprovalMode } from '../config/config.js';
 import { fetchWithTimeout } from '../utils/fetch.js';
 import { DEFAULT_DIFF_OPTIONS } from './diffOptions.js';
-import { GeminiClient } from '../core/client.js';
 import { getResponseText } from '../utils/generateContentResponseUtilities.js';
 import { Type } from '@google/genai';
 
@@ -44,7 +43,6 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
 
   constructor(
     private readonly config: Config,
-    private readonly geminiClient: GeminiClient,
   ) {
     super(
       ApiManagementTool.Name,
@@ -73,14 +71,9 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
   }
 
   validateToolParams(params: ApiManagementToolParams): string | null {
-    if (
-      this.schema.parameters &&
-      !SchemaValidator.validate(
-        this.schema.parameters as Record<string, unknown>,
-        params,
-      )
-    ) {
-      return 'Parameters failed schema validation.';
+    const errors = SchemaValidator.validate(this.schema.parameters, params);
+    if (errors) {
+      return errors;
     }
 
     if (!params.apiName || params.apiName.trim() === '') {
@@ -378,7 +371,12 @@ ${changeDescription}
         role: 'user' as const
       }];
       
-      const response = await this.geminiClient.generateContent(contents, {}, signal);
+      const geminiClient = this.config.getGeminiClient();
+      if (!geminiClient) {
+        throw new Error('Gemini客户端未初始化，请检查身份验证状态');
+      }
+      
+      const response = await geminiClient.generateContent(contents, {}, signal);
 
       const modifiedApiText = getResponseText(response);
       if (!modifiedApiText) {

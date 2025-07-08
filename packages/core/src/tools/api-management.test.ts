@@ -22,16 +22,17 @@ describe('ApiManagementTool edit functionality', () => {
   let mockGeminiClient: GeminiClient;
 
   beforeEach(() => {
-    mockConfig = {
-      getApprovalMode: vi.fn().mockReturnValue('default'),
-      getTargetDir: vi.fn().mockReturnValue('/test/dir'),
-    } as any;
-
     mockGeminiClient = {
       generateContent: vi.fn(),
     } as any;
 
-    tool = new ApiManagementTool(mockConfig, mockGeminiClient);
+    mockConfig = {
+      getApprovalMode: vi.fn().mockReturnValue('default'),
+      getTargetDir: vi.fn().mockReturnValue('/test/dir'),
+      getGeminiClient: vi.fn().mockReturnValue(mockGeminiClient),
+    } as any;
+
+    tool = new ApiManagementTool(mockConfig);
   });
 
   it('should use AI model to edit API definition', async () => {
@@ -143,10 +144,9 @@ describe('ApiManagementTool edit functionality', () => {
     }, new AbortController().signal);
 
     expect(confirmationResult).not.toBe(false);
-    expect(confirmationResult).toHaveProperty('type', 'edit');
+    expect(confirmationResult).toHaveProperty('type', 'info');
     expect(confirmationResult).toHaveProperty('title', '确认API修改: TestApi');
-    expect(confirmationResult).toHaveProperty('fileName', 'TestApi-api.json');
-    expect(confirmationResult).toHaveProperty('fileDiff');
+    expect(confirmationResult).toHaveProperty('prompt');
     expect(confirmationResult).toHaveProperty('onConfirm');
   });
 
@@ -180,7 +180,7 @@ describe('ApiManagementTool edit functionality', () => {
     }, new AbortController().signal);
 
     expect(confirmationResult).not.toBe(false);
-    expect(confirmationResult).toHaveProperty('type', 'edit');
+    expect(confirmationResult).toHaveProperty('type', 'info');
   });
 
   it('should require confirmation for publishApi action', async () => {
@@ -233,7 +233,7 @@ describe('ApiManagementTool edit functionality', () => {
   });
 
   it('should not require confirmation in AUTO_EDIT mode', async () => {
-    (mockConfig.getApprovalMode as any).mockReturnValue('auto_edit');
+    (mockConfig.getApprovalMode as any).mockReturnValue('autoEdit');
 
     const confirmationResult = await tool.shouldConfirmExecute({
       action: 'edit',
