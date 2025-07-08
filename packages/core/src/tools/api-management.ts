@@ -22,6 +22,7 @@ import { fetchWithTimeout } from '../utils/fetch.js';
 import { DEFAULT_DIFF_OPTIONS } from './diffOptions.js';
 import { GeminiClient } from '../core/client.js';
 import { getResponseText } from '../utils/generateContentResponseUtilities.js';
+import { Type } from '@google/genai';
 
 const API_TIMEOUT_MS = 10000;
 const API_BASE_URL = 'https://pre-cs.api.aliyun-inc.com';
@@ -53,20 +54,20 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
         properties: {
           action: {
             description: '要执行的操作类型：get（获取API）、edit（修改API定义和参数）、publish（发布API）',
-            type: 'string',
+            type: Type.STRING,
             enum: ['get', 'edit', 'publish'],
           },
           apiName: {
             description: '需要管理的API名称（如：CreateInstance、ListUsers 等）',
-            type: 'string',
+            type: Type.STRING,
           },
           changeDescription: {
             description: '修改描述，用于edit操作时描述需要进行的具体修改',
-            type: 'string',
+            type: Type.STRING,
           }
         },
         required: ['action', 'apiName'],
-        type: 'object',
+        type: Type.OBJECT,
       },
     );
   }

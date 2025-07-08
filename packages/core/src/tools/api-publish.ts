@@ -13,6 +13,7 @@ import {
 } from './tools.js';
 import { getErrorMessage } from '../utils/errors.js';
 import { Config, ApprovalMode } from '../config/config.js';
+import { Type } from '@google/genai';
 
 const API_TIMEOUT_MS = 10000;
 const API_BASE_URL = 'http://127.0.0.1:7001';
@@ -40,16 +41,16 @@ export class ApiPublishTool extends BaseTool<ApiPublishToolParams, ToolResult> {
         properties: {
           apiName: {
             description: 'The name of the API to publish',
-            type: 'string',
+            type: Type.STRING,
           },
           environment: {
             description: 'The target environment for deployment',
-            type: 'string',
+            type: Type.STRING,
             enum: ['dev', 'test', 'prod'],
           },
         },
         required: ['apiName'],
-        type: 'object',
+        type: Type.OBJECT,
       },
     );
   }

@@ -16,6 +16,7 @@ import { Config, ApprovalMode } from '../config/config.js';
 import { WriteFileTool } from './write-file.js';
 import { EditTool } from './edit.js';
 import { getResponseText } from '../utils/generateContentResponseUtilities.js';
+import { Type } from '@google/genai';
 import path from 'path';
 import fs from 'fs';
 
@@ -50,25 +51,25 @@ export class ApiImplementationTool extends BaseTool<ApiImplementationToolParams,
         properties: {
           apiName: {
             description: 'The name of the API to implement',
-            type: 'string',
+            type: Type.STRING,
           },
           outputPath: {
             description: 'The output directory path for generated files (optional, defaults to current directory)',
-            type: 'string',
+            type: Type.STRING,
           },
           language: {
             description: 'The programming language for code generation',
-            type: 'string',
+            type: Type.STRING,
             enum: ['java', 'javascript', 'typescript', 'python'],
           },
           framework: {
             description: 'The framework to use for code generation',
-            type: 'string',
+            type: Type.STRING,
             enum: ['spring', 'express', 'fastapi', 'auto'],
           },
         },
         required: ['apiName'],
-        type: 'object',
+        type: Type.OBJECT,
       },
     );
     this.writeFileTool = new WriteFileTool(config);
