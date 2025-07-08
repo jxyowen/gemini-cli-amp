@@ -433,7 +433,7 @@ ${changeDescription}
     const response = await this.fetchWithTimeoutAndOptions(
       url,
       {
-        method: 'POST',
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
