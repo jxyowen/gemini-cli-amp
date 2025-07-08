@@ -30,8 +30,8 @@ const API_BASE_URL = 'https://pre-cs.api.aliyun-inc.com';
  * 通用API管理工具参数
  */
 export interface ApiManagementToolParams {
-  action: 'get' | 'edit' | 'publish';
-  apiName: string;
+  action: 'get' | 'edit' | 'publish' | 'list';
+  apiName?: string;
   changeDescription?: string;
 }
 
@@ -47,16 +47,16 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
     super(
       ApiManagementTool.Name,
       '镇元(阿里云) API 管理',
-      '本工具专用于管理镇元API、阿里云API等接口的全生命周期，包括API修改、发布等。',
+      '本工具专用于管理镇元API、阿里云API等接口的全生命周期，包括API获取、修改、发布、列表查询等。',
       {
         properties: {
           action: {
-            description: '要执行的操作类型：get（获取API）、edit（修改API定义和参数）、publish（发布API）',
+            description: '要执行的操作类型：get（获取API）、edit（修改API定义和参数）、publish（发布API）、list（获取API名称列表）',
             type: Type.STRING,
-            enum: ['get', 'edit', 'publish'],
+            enum: ['get', 'edit', 'publish', 'list'],
           },
           apiName: {
-            description: '需要管理的API名称（如：CreateInstance、ListUsers 等）',
+            description: '需要管理的API名称（如：CreateInstance、ListUsers 等），list操作时可选',
             type: Type.STRING,
           },
           changeDescription: {
@@ -64,7 +64,7 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
             type: Type.STRING,
           }
         },
-        required: ['action', 'apiName'],
+        required: ['action'],
         type: Type.OBJECT,
       },
     );
@@ -76,7 +76,8 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
       return errors;
     }
 
-    if (!params.apiName || params.apiName.trim() === '') {
+    // list操作不需要apiName参数
+    if (params.action !== 'list' && (!params.apiName || params.apiName.trim() === '')) {
       return "The 'apiName' parameter cannot be empty.";
     }
 
@@ -95,6 +96,8 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
         return `修改API定义: ${params.apiName} - ${params.changeDescription}`;
       case 'publish':
         return `发布API到网关: ${params.apiName}`;
+      case 'list':
+        return `获取API名称列表`;
       default:
         return `API管理操作: ${params.action}`;
     }
@@ -113,13 +116,16 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
       return false;
     }
 
-    // 只有get操作不需要人工确认，edit和publish都需要确认
-    if (params.action === 'get') {
+    // 只有get和list操作不需要人工确认，edit和publish都需要确认
+    if (params.action === 'get' || params.action === 'list') {
       return false;
     }
 
     // 对于edit操作，生成确认详情
     if (params.action === 'edit') {
+      if (!params.apiName) {
+        return false;
+      }
       try {
         // 预先计算edit结果用于展示diff
         const editResult = await this.editApi(params.apiName, params.changeDescription!, signal);
@@ -205,11 +211,17 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
 
       switch (params.action) {
         case 'get':
+          if (!params.apiName) {
+            throw new Error('apiName参数是必需的');
+          }
           result = await this.getApi(params.apiName, signal);
           displayMessage = `成功获取API定义: ${params.apiName}`;
           displayResult = `${displayMessage}\n\n${JSON.stringify(result, null, 2)}`;
           break;
         case 'edit':
+          if (!params.apiName) {
+            throw new Error('apiName参数是必需的');
+          }
           // 检查是否有缓存的编辑结果（来自shouldConfirmExecute）
           const cachedResult = (this as any)._cachedEditResult;
           let beforeData: any;
@@ -247,9 +259,17 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
           }
           break;
         case 'publish':
+          if (!params.apiName) {
+            throw new Error('apiName参数是必需的');
+          }
           result = await this.publishApi(params.apiName, signal);
           displayMessage = `成功发布API到网关: ${params.apiName}`;
           displayResult = `${displayMessage}\n\n${JSON.stringify(result, null, 2)}`;
+          break;
+        case 'list':
+          result = await this.listApiNames(signal);
+          displayMessage = `成功获取API名称列表`;
+          displayResult = `${displayMessage}\n\n可用的API:\n${result.map((name: string) => `- ${name}`).join('\n')}`;
           break;
         default:
           throw new Error(`不支持的操作: ${params.action}`);
@@ -283,7 +303,27 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
       throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
     }
 
-    return await response.json();
+    const responseData = await response.json();
+    return responseData.data || responseData;
+  }
+
+  private async listApiNames(signal: AbortSignal): Promise<string[]> {
+    const url = `${API_BASE_URL}/api/v2/idea_plugin/apis`;
+    
+    const response = await this.fetchWithTimeoutAndOptions(
+      url,
+      {
+        method: 'GET',
+        signal,
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
+    }
+
+    const responseData = await response.json();
+    return responseData.data || [];
   }
 
   private async fetchWithTimeoutAndOptions(
@@ -423,7 +463,8 @@ ${changeDescription}
       throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
     }
 
-    return await response.json();
+    const responseData = await response.json();
+    return responseData.data || responseData;
   }
 
   private async updateApi(apiName: string, updatedApiJson: string, signal: AbortSignal): Promise<any> {
@@ -445,6 +486,7 @@ ${changeDescription}
       throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
     }
 
-    return await response.json();
+    const responseData = await response.json();
+    return responseData.data || responseData;
   }
 } 

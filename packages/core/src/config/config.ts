@@ -29,7 +29,6 @@ import {
 import { WebSearchTool } from '../tools/web-search.js';
 import { ApiManagementTool } from '../tools/api-management.js';
 import { ApiImplementationTool } from '../tools/api-implementation.js';
-import { ApiPublishTool } from '../tools/api-publish.js';
 import { GeminiClient } from '../core/client.js';
 import { FileDiscoveryService } from '../services/fileDiscoveryService.js';
 import { GitService } from '../services/gitService.js';
@@ -523,7 +522,6 @@ export class Config {
     // API Lifecycle Management Tools
     registerCoreTool(ApiManagementTool, this);
     registerCoreTool(ApiImplementationTool, this);
-    registerCoreTool(ApiPublishTool, this);
 
     await registry.discoverTools();
     return registry;

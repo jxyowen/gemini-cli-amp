@@ -4,7 +4,6 @@
 这个Agent专注于API的全生命周期管理，包括：
 - API设计和修改
 - API实现代码生成
-- API发布到网关
 
 ## 新增工具
 
@@ -13,7 +12,6 @@
 - **get**: 获取API定义
 - **edit**: 修改API定义（支持自然语言描述修改需求，会显示美观的diff对比，并自动持久化修改）
 - **update**: 更新API定义
-- **publish**: 发布API到网关
 
 **edit操作流程**：
 1. 调用get_api接口获取当前API定义
@@ -37,12 +35,6 @@
 - 自动检测项目语言和框架
 - 复用现有的代码生成能力
 
-### 3. api_publish - API发布工具
-发布API到网关：
-- 支持多环境发布（dev/test/prod）
-- 发布前检查API存在性
-- 验证发布状态
-
 ## 后端API接口
 
 ### 1. `/test/get_api` - 获取API
@@ -56,11 +48,6 @@
   - `apiName` (string) - API名称  
   - `apiMeta` (string) - API元数据
 - **Response**: 更新结果JSON
-
-### 3. `/test/publish_api` - 发布API
-- **Method**: POST
-- **Query Parameters**: `apiName` (string) - API名称
-- **Response**: 发布结果JSON
 
 **注意**: edit操作现在使用大模型本地修改API定义，不再调用后端edit_api接口。
 
@@ -90,16 +77,6 @@ Agent会：
 2. 检测项目使用的Java+Spring框架
 3. 生成对应的Controller代码
 4. 保存到项目中
-
-### API发布
-```
-Agent: 将用户API发布到测试环境
-```
-
-Agent会：
-1. 检查API是否存在
-2. 发布到指定环境
-3. 验证发布状态
 
 ## 技术特性
 
@@ -141,15 +118,13 @@ Agent会：
 ```
 packages/core/src/tools/
 ├── api-management.ts     # API管理工具（使用大模型修改）
-├── api-implementation.ts # API实现代码生成
-└── api-publish.ts       # API发布工具
+└── api-implementation.ts # API实现代码生成
 ```
 
 ## 配置说明
 
 在`packages/core/src/config/config.ts`中已注册所有工具：
 - ApiManagementTool（传递config和geminiClient参数）
-- ApiImplementationTool  
-- ApiPublishTool
+- ApiImplementationTool
 
 现在Agent可以处理完整的API生命周期管理任务。
