@@ -24,7 +24,7 @@ import { GeminiClient } from '../core/client.js';
 import { getResponseText } from '../utils/generateContentResponseUtilities.js';
 
 const API_TIMEOUT_MS = 10000;
-const API_BASE_URL = 'http://127.0.0.1:7001';
+const API_BASE_URL = 'https://pre-cs.api.aliyun-inc.com';
 
 /**
  * 通用API管理工具参数
@@ -275,16 +275,12 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
   }
 
   private async getApi(apiName: string, signal: AbortSignal): Promise<any> {
-    const url = `${API_BASE_URL}/test/get_api`;
-    const params = new URLSearchParams({ apiName });
+    const url = `${API_BASE_URL}/api/v2/idea_plugin/apis/${apiName}`;
     
     const response = await this.fetchWithTimeoutAndOptions(
-      `${url}?${params.toString()}`,
+      url,
       {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        method: 'GET',
         signal,
       }
     );
@@ -310,8 +306,17 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
       ...(ampToken && { 'amp_plugin_token': ampToken })
     };
 
+    // 从环境变量获取projectUuid并添加到查询参数中
+    const projectUuid = process.env.AMP_CLI_PROJECT;
+    let finalUrl = url;
+    if (projectUuid) {
+      const urlObj = new URL(url);
+      urlObj.searchParams.append('projectUuid', projectUuid);
+      finalUrl = urlObj.toString();
+    }
+
     try {
-      const response = await fetch(url, {
+      const response = await fetch(finalUrl, {
         ...options,
         headers,
         signal: options.signal || controller.signal,
@@ -423,11 +428,10 @@ ${changeDescription}
   }
 
   private async updateApi(apiName: string, updatedApiJson: string, signal: AbortSignal): Promise<any> {
-    const url = `${API_BASE_URL}/test/update_api`;
-    const params = new URLSearchParams({ apiName });
+    const url = `${API_BASE_URL}/api/v2/idea_plugin/apis/${apiName}`;
     
     const response = await this.fetchWithTimeoutAndOptions(
-      `${url}?${params.toString()}`,
+      url,
       {
         method: 'POST',
         headers: {
