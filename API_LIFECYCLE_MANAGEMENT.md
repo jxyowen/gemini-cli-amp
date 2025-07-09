@@ -118,13 +118,13 @@ Agent会：
 ```
 packages/core/src/tools/
 ├── api-management.ts     # API管理工具（使用大模型修改）
-└── api-implementation.ts # API实现代码生成
+
 ```
 
 ## 配置说明
 
 在`packages/core/src/config/config.ts`中已注册所有工具：
 - ApiManagementTool（传递config和geminiClient参数）
-- ApiImplementationTool
+
 
 现在Agent可以处理完整的API生命周期管理任务。
