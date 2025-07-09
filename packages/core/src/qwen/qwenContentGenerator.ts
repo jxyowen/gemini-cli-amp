@@ -208,7 +208,7 @@ export class QwenContentGenerator implements ContentGenerator {
         for (const line of lines) {
           if (line.trim() === '') continue;
           if (line.startsWith('data: ')) {
-            const data = line.slice(6).trim();
+            const data = line.slice(6).trim(); 
             if (data === '[DONE]') {
               return;
             }
