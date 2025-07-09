@@ -188,7 +188,7 @@ export class QwenContentGenerator implements ContentGenerator {
   private async *processStreamResponse(
     response: Response
   ): AsyncGenerator<GenerateContentResponse> {
-    const reader = response.body?.getReader();
+    const reader = response.body?.getReader();  
     if (!reader) {
       throw new Error('Response body is not readable');
     }
