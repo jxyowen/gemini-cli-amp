@@ -14,8 +14,9 @@ import {
   GoogleGenAI,
 } from '@google/genai';
 import { createCodeAssistContentGenerator } from '../code_assist/codeAssist.js';
-import { DEFAULT_GEMINI_MODEL } from '../config/models.js';
+import { DEFAULT_GEMINI_MODEL, DEFAULT_QWEN_MODEL, isQwenModel } from '../config/models.js';
 import { getEffectiveModel } from './modelCheck.js';
+import { QwenContentGenerator } from '../qwen/qwenContentGenerator.js';
 
 /**
  * Interface abstracting the core functionalities for generating content and counting tokens.
@@ -39,6 +40,7 @@ export enum AuthType {
   USE_GEMINI = 'gemini-api-key',
   USE_VERTEX_AI = 'vertex-ai',
   CLOUD_SHELL = 'cloud-shell',
+  USE_QWEN_API = 'qwen-api-key',
 }
 
 export type ContentGeneratorConfig = {
@@ -46,6 +48,11 @@ export type ContentGeneratorConfig = {
   apiKey?: string;
   vertexai?: boolean;
   authType?: AuthType | undefined;
+  // 通义千问特定配置
+  qwenConfig?: {
+    baseUrl?: string; // 默认: https://dashscope.aliyuncs.com/compatible-mode/v1 (OpenAI 兼容模式)
+    region?: string;  // 阿里云区域
+  };
 };
 
 export async function createContentGeneratorConfig(
@@ -56,9 +63,11 @@ export async function createContentGeneratorConfig(
   const googleApiKey = process.env.GOOGLE_API_KEY;
   const googleCloudProject = process.env.GOOGLE_CLOUD_PROJECT;
   const googleCloudLocation = process.env.GOOGLE_CLOUD_LOCATION;
+  const qwenApiKey = process.env.QWEN_API_KEY;
 
-  // Use runtime model from config if available, otherwise fallback to parameter or default
-  const effectiveModel = model || DEFAULT_GEMINI_MODEL;
+  // Use runtime model from config if available, otherwise fallback to parameter or auth-specific default
+  const defaultModel = authType === AuthType.USE_QWEN_API ? DEFAULT_QWEN_MODEL : DEFAULT_GEMINI_MODEL;
+  const effectiveModel = model || defaultModel;
 
   const contentGeneratorConfig: ContentGeneratorConfig = {
     model: effectiveModel,
@@ -99,6 +108,16 @@ export async function createContentGeneratorConfig(
     return contentGeneratorConfig;
   }
 
+  if (authType === AuthType.USE_QWEN_API && qwenApiKey) {
+    contentGeneratorConfig.apiKey = qwenApiKey;
+    contentGeneratorConfig.qwenConfig = {
+      baseUrl: process.env.QWEN_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      region: process.env.QWEN_REGION,
+    };
+
+    return contentGeneratorConfig;
+  }
+
   return contentGeneratorConfig;
 }
 
@@ -112,6 +131,13 @@ export async function createContentGenerator(
       'User-Agent': `GeminiCLI/${version} (${process.platform}; ${process.arch})`,
     },
   };
+  
+  // 通义千问 API
+  if (config.authType === AuthType.USE_QWEN_API) {
+    return new QwenContentGenerator(config, httpOptions);
+  }
+  
+  // Google 认证方式
   if (
     config.authType === AuthType.LOGIN_WITH_GOOGLE ||
     config.authType === AuthType.CLOUD_SHELL
@@ -123,6 +149,7 @@ export async function createContentGenerator(
     );
   }
 
+  // Gemini API 或 Vertex AI
   if (
     config.authType === AuthType.USE_GEMINI ||
     config.authType === AuthType.USE_VERTEX_AI
@@ -134,6 +161,11 @@ export async function createContentGenerator(
     });
 
     return googleGenAI.models;
+  }
+
+  // 根据模型自动选择 API（向后兼容）
+  if (config.model && isQwenModel(config.model) && config.apiKey) {
+    return new QwenContentGenerator(config, httpOptions);
   }
 
   throw new Error(

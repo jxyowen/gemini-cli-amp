@@ -38,5 +38,17 @@ export const validateAuthMethod = (authMethod: string): string | null => {
     return null;
   }
 
+  if (authMethod === AuthType.USE_QWEN_API) {
+    if (!process.env.QWEN_API_KEY) {
+      return (
+        'QWEN_API_KEY environment variable not found.\n' +
+        '• Get your API key from Alibaba Cloud DashScope console: https://bailian.console.aliyun.com/\n' +
+        '• Add QWEN_API_KEY to your .env file and try again, no reload needed!\n' +
+        '• Optionally set QWEN_BASE_URL if using a custom endpoint.'
+      );
+    }
+    return null;
+  }
+
   return 'Invalid auth method selected.';
 };

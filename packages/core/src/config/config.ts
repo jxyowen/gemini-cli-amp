@@ -41,6 +41,7 @@ import {
   StartSessionEvent,
 } from '../telemetry/index.js';
 import {
+  DEFAULT_GEMINI_MODEL,
   DEFAULT_GEMINI_EMBEDDING_MODEL,
   DEFAULT_GEMINI_FLASH_MODEL,
 } from './models.js';
@@ -247,8 +248,12 @@ export class Config {
   }
 
   async refreshAuth(authMethod: AuthType) {
+    // If user hasn't explicitly set a model (still using default Gemini model),
+    // let createContentGeneratorConfig choose the appropriate default for the auth method
+    const modelToUse = this.model === DEFAULT_GEMINI_MODEL ? undefined : this.model;
+    
     this.contentGeneratorConfig = await createContentGeneratorConfig(
-      this.model,
+      modelToUse,
       authMethod,
     );
 

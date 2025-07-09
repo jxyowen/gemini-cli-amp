@@ -44,6 +44,10 @@ export function AuthDialog({
       value: AuthType.USE_GEMINI,
     },
     { label: 'Vertex AI', value: AuthType.USE_VERTEX_AI },
+    {
+      label: 'Use Qwen API Key',
+      value: AuthType.USE_QWEN_API,
+    },
   ];
 
   let initialAuthIndex = items.findIndex(
