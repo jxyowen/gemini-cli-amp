@@ -185,13 +185,20 @@ export function fromQwenGenerateResponse(qwenResponse: QwenGenerateResponse): Ge
   const choice = qwenResponse.choices?.[0];
   const text = choice?.message?.content || '';
   
+  // 添加调试日志：输出原始Qwen响应
+  console.debug('[DEBUG] Qwen原始响应:', JSON.stringify(qwenResponse, null, 2));
+  
   // 处理基本响应
   const parts: any[] = text ? [{ text }] : [];
   const functionCalls: any[] = [];
   
   // 处理tool_calls
   if (choice?.message?.tool_calls && choice.message.tool_calls.length > 0) {
+    console.debug('[DEBUG] 检测到tool_calls:', choice.message.tool_calls.length, '个');
+    
     for (const toolCall of choice.message.tool_calls) {
+      console.debug('[DEBUG] 处理tool_call:', JSON.stringify(toolCall, null, 2));
+      
       let args = {};
       if (toolCall.function.arguments) {
         try {
@@ -207,6 +214,8 @@ export function fromQwenGenerateResponse(qwenResponse: QwenGenerateResponse): Ge
         name: toolCall.function.name,
         args,
       };
+      
+      console.debug('[DEBUG] 生成的functionCall:', JSON.stringify(functionCall, null, 2));
       
       // 添加到parts数组中（用于GenerateContentResponse的标准格式）
       parts.push({ functionCall });
@@ -238,7 +247,10 @@ export function fromQwenGenerateResponse(qwenResponse: QwenGenerateResponse): Ge
   // 如果有function calls，设置functionCalls属性
   if (functionCalls.length > 0) {
     response.functionCalls = functionCalls;
+    console.debug('[DEBUG] 最终响应中的functionCalls:', JSON.stringify(functionCalls, null, 2));
   }
+  
+  console.debug('[DEBUG] 转换后的完整响应:', JSON.stringify(response, null, 2));
   
   return response as GenerateContentResponse;
 }
@@ -251,13 +263,20 @@ export function fromQwenStreamResponse(qwenChunk: any): GenerateContentResponse 
   const delta = choice?.delta || {};
   const content = delta.content || '';
   
+  // 添加调试日志：输出原始流式响应块
+  console.debug('[DEBUG] Qwen流式响应块:', JSON.stringify(qwenChunk, null, 2));
+  
   // 处理基本响应
   const parts: any[] = content ? [{ text: content }] : [];
   const functionCalls: any[] = [];
 
   // 处理tool_calls（流式响应中也可能包含）
   if (delta.tool_calls && delta.tool_calls.length > 0) {
+    console.debug('[DEBUG] 流式响应中检测到tool_calls:', delta.tool_calls.length, '个');
+    
     for (const toolCall of delta.tool_calls) {
+      console.debug('[DEBUG] 处理流式tool_call:', JSON.stringify(toolCall, null, 2));
+      
       let args = {};
       if (toolCall.function?.arguments) {
         try {
@@ -273,6 +292,8 @@ export function fromQwenStreamResponse(qwenChunk: any): GenerateContentResponse 
         name: toolCall.function?.name || '',
         args,
       };
+      
+      console.debug('[DEBUG] 生成的流式functionCall:', JSON.stringify(functionCall, null, 2));
       
       // 添加到parts数组中（用于GenerateContentResponse的标准格式）
       parts.push({ functionCall });
@@ -299,6 +320,7 @@ export function fromQwenStreamResponse(qwenChunk: any): GenerateContentResponse 
   // 如果有function calls，设置functionCalls属性
   if (functionCalls.length > 0) {
     response.functionCalls = functionCalls;
+    console.debug('[DEBUG] 流式响应最终functionCalls:', JSON.stringify(functionCalls, null, 2));
   }
   
   return response as GenerateContentResponse;

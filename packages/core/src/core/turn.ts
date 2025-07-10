@@ -204,9 +204,14 @@ export class Turn {
 
         // Handle function calls (requesting tool execution)
         const functionCalls = resp.functionCalls ?? [];
+        console.debug(`[DEBUG] Turn.run - 收到 ${functionCalls.length} 个functionCalls`);
+        
         for (const fnCall of functionCalls) {
+          console.debug(`[DEBUG] Turn.run - 处理functionCall: ${JSON.stringify(fnCall, null, 2)}`);
+          
           const event = this.handlePendingFunctionCall(fnCall);
           if (event) {
+            console.debug(`[DEBUG] Turn.run - 生成事件: ${JSON.stringify(event, null, 2)}`);
             yield event;
           }
         }

@@ -86,19 +86,29 @@ export async function runNonInteractive(
           console.error('Operation cancelled.');
           return;
         }
+        
+        // 添加调试日志：输出每个响应
+        console.debug(`[DEBUG] 收到响应: ${JSON.stringify(resp, null, 2)}`);
+        
         const textPart = getResponseText(resp);
         if (textPart) {
           process.stdout.write(textPart);
         }
         if (resp.functionCalls) {
+          console.debug(`[DEBUG] 响应中包含functionCalls: ${resp.functionCalls.length} 个`);
+          console.debug(`[DEBUG] functionCalls详情: ${JSON.stringify(resp.functionCalls, null, 2)}`);
           functionCalls.push(...resp.functionCalls);
         }
       }
 
       if (functionCalls.length > 0) {
+        console.debug(`[DEBUG] 总共收到 ${functionCalls.length} 个工具调用`);
+        
         const toolResponseParts: Part[] = [];
 
         for (const fc of functionCalls) {
+          console.debug(`[DEBUG] 处理工具调用: ${JSON.stringify(fc, null, 2)}`);
+          
           const callId = fc.id ?? `${fc.name}-${Date.now()}`;
           const requestInfo: ToolCallRequestInfo = {
             callId,
@@ -108,12 +118,21 @@ export async function runNonInteractive(
             prompt_id,
           };
 
+          console.debug(`[DEBUG] 工具调用请求信息: ${JSON.stringify(requestInfo, null, 2)}`);
+
           const toolResponse = await executeToolCall(
             config,
             requestInfo,
             toolRegistry,
             abortController.signal,
           );
+
+          console.debug(`[DEBUG] 工具执行结果: ${JSON.stringify({
+            callId: toolResponse.callId,
+            error: toolResponse.error?.message,
+            hasResponseParts: !!toolResponse.responseParts,
+            resultDisplay: toolResponse.resultDisplay
+          }, null, 2)}`);
 
           if (toolResponse.error) {
             const isToolNotFound = toolResponse.error.message.includes(
