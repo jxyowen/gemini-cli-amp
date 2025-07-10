@@ -299,24 +299,68 @@ export class QwenContentGenerator implements ContentGenerator {
   private createToolCallResponse(
     accumulatedToolCalls: Map<string, any>
   ): GenerateContentResponse {
-    const toolCallsArray = Array.from(accumulatedToolCalls.values());
+    const parts: any[] = [];
+    const functionCalls: any[] = [];
     
-    // 创建模拟的Qwen响应格式
-    const mockQwenResponse = {
-      choices: [{
-        delta: {
-          tool_calls: toolCallsArray.map(toolCall => ({
-            id: toolCall.id,
-            type: toolCall.type,
-            function: {
-              name: toolCall.function.name,
-              arguments: toolCall.function.arguments
-            }
-          }))
+    console.debug('[DEBUG] 开始处理累积的tool_calls:', accumulatedToolCalls.size, '个');
+    
+    for (const toolCall of accumulatedToolCalls.values()) {
+      console.debug('[DEBUG] 处理累积的tool_call:', JSON.stringify(toolCall, null, 2));
+      
+      let args = {};
+      if (toolCall.function.arguments) {
+        try {
+          // 现在在这里统一进行JSON解析，arguments应该是完整拼接后的字符串
+          console.debug('[DEBUG] 尝试解析完整的arguments:', toolCall.function.arguments);
+          args = JSON.parse(toolCall.function.arguments);
+          console.debug('[DEBUG] 成功解析tool_call参数:', JSON.stringify(args, null, 2));
+        } catch (error) {
+          console.error(`解析累积的tool call参数失败: ${toolCall.function.arguments}`, error);
+          // 如果解析失败，尝试作为字符串处理
+          try {
+            // 可能参数本身就是一个字符串，尝试包装成对象
+            args = { value: toolCall.function.arguments };
+          } catch {
+            args = {}; // 最后的fallback
+          }
         }
-      }]
+      }
+      
+      const functionCall = {
+        id: toolCall.id || `${toolCall.function?.name || 'unknown'}-${Date.now()}`,
+        name: toolCall.function?.name || '',
+        args,
+      };
+      
+      console.debug('[DEBUG] 生成的最终functionCall:', JSON.stringify(functionCall, null, 2));
+      
+      // 添加到parts数组中（用于GenerateContentResponse的标准格式）
+      parts.push({ functionCall });
+      
+      // 添加到functionCalls数组中（用于响应级别属性）
+      functionCalls.push(functionCall);
+    }
+
+    const candidate: any = {
+      content: {
+        role: 'model',
+        parts,
+      },
+      finishReason: 'STOP',
+      index: 0,
+    };
+
+    // 构建最终响应
+    const response: any = {
+      candidates: [candidate],
     };
     
-    return fromQwenStreamResponse(mockQwenResponse);
+    // 如果有function calls，设置functionCalls属性
+    if (functionCalls.length > 0) {
+      response.functionCalls = functionCalls;
+      console.debug('[DEBUG] 累积处理后的最终functionCalls:', JSON.stringify(functionCalls, null, 2));
+    }
+    
+    return response as GenerateContentResponse;
   }
 } 

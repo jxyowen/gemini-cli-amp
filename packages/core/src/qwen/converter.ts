@@ -256,7 +256,7 @@ export function fromQwenGenerateResponse(qwenResponse: QwenGenerateResponse): Ge
 }
 
 /**
- * 将 Qwen 流式响应转换为 Gemini 格式
+ * 将 Qwen 流式响应转换为 Gemini 格式（仅用于文本内容，tool_calls通过累积机制处理）
  */
 export function fromQwenStreamResponse(qwenChunk: any): GenerateContentResponse {
   const choice = qwenChunk.choices?.[0];
@@ -264,52 +264,10 @@ export function fromQwenStreamResponse(qwenChunk: any): GenerateContentResponse 
   const content = delta.content || '';
   
   // 添加调试日志：输出原始流式响应块
-  console.debug('[DEBUG] Qwen流式响应块:', JSON.stringify(qwenChunk, null, 2));
+  console.debug('[DEBUG] Qwen流式文本响应块:', JSON.stringify(qwenChunk, null, 2));
   
-  // 处理基本响应
+  // 只处理文本内容，tool_calls由累积机制处理
   const parts: any[] = content ? [{ text: content }] : [];
-  const functionCalls: any[] = [];
-
-  // 处理tool_calls（现在应该是完整的累积数据）
-  if (delta.tool_calls && delta.tool_calls.length > 0) {
-    console.debug('[DEBUG] 流式响应中检测到完整tool_calls:', delta.tool_calls.length, '个');
-    
-    for (const toolCall of delta.tool_calls) {
-      console.debug('[DEBUG] 处理完整tool_call:', JSON.stringify(toolCall, null, 2));
-      
-      let args = {};
-      if (toolCall.function?.arguments) {
-        try {
-          // 现在arguments应该是完整的，可以安全解析
-          args = JSON.parse(toolCall.function.arguments);
-          console.debug('[DEBUG] 成功解析tool_call参数:', JSON.stringify(args, null, 2));
-        } catch (error) {
-          console.error(`解析tool call参数失败: ${toolCall.function.arguments}`, error);
-          // 如果解析失败，尝试作为字符串处理
-          try {
-            // 可能参数本身就是一个字符串，尝试包装成对象
-            args = { value: toolCall.function.arguments };
-          } catch {
-            args = {}; // 最后的fallback
-          }
-        }
-      }
-      
-      const functionCall = {
-        id: toolCall.id || `${toolCall.function?.name || 'unknown'}-${Date.now()}`,
-        name: toolCall.function?.name || '',
-        args,
-      };
-      
-      console.debug('[DEBUG] 生成的完整functionCall:', JSON.stringify(functionCall, null, 2));
-      
-      // 添加到parts数组中（用于GenerateContentResponse的标准格式）
-      parts.push({ functionCall });
-      
-      // 添加到functionCalls数组中（用于响应级别属性）
-      functionCalls.push(functionCall);
-    }
-  }
 
   const candidate: any = {
     content: {
@@ -320,16 +278,9 @@ export function fromQwenStreamResponse(qwenChunk: any): GenerateContentResponse 
     index: 0,
   };
 
-  // 使用对象字面量创建响应，这样可以设置functionCalls属性
   const response: any = {
     candidates: [candidate],
   };
-  
-  // 如果有function calls，设置functionCalls属性
-  if (functionCalls.length > 0) {
-    response.functionCalls = functionCalls;
-    console.debug('[DEBUG] 流式响应最终functionCalls:', JSON.stringify(functionCalls, null, 2));
-  }
   
   return response as GenerateContentResponse;
 }
