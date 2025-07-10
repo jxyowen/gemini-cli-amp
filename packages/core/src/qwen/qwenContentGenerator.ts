@@ -195,6 +195,16 @@ export class QwenContentGenerator implements ContentGenerator {
 
     const decoder = new TextDecoder();
     let buffer = '';
+    
+    // 累积tool_calls的状态
+    const accumulatedToolCalls = new Map<string, {
+      id: string;
+      type: string;
+      function: {
+        name?: string;
+        arguments?: string;
+      };
+    }>();
 
     try {
       while (true) {
@@ -210,6 +220,10 @@ export class QwenContentGenerator implements ContentGenerator {
           if (line.startsWith('data: ')) {
             const data = line.slice(6).trim(); 
             if (data === '[DONE]') {
+              // 流结束，如果有累积的tool_calls，输出最终结果
+              if (accumulatedToolCalls.size > 0) {
+                yield this.createToolCallResponse(accumulatedToolCalls);
+              }
               return;
             }
             
@@ -219,19 +233,52 @@ export class QwenContentGenerator implements ContentGenerator {
               if (chunk.choices && chunk.choices.length > 0) {
                 const choice = chunk.choices[0];
                 
+                // 处理tool_calls累积
+                if (choice.delta?.tool_calls && choice.delta.tool_calls.length > 0) {
+                  for (const toolCall of choice.delta.tool_calls) {
+                    const toolCallId = toolCall.id || `tool_${toolCall.index || 0}`;
+                    
+                    if (!accumulatedToolCalls.has(toolCallId)) {
+                      accumulatedToolCalls.set(toolCallId, {
+                        id: toolCallId,
+                        type: toolCall.type || 'function',
+                        function: {}
+                      });
+                    }
+                    
+                    const accumulated = accumulatedToolCalls.get(toolCallId)!;
+                    
+                    // 累积function name
+                    if (toolCall.function?.name) {
+                      accumulated.function.name = toolCall.function.name;
+                    }
+                    
+                    // 累积function arguments
+                    if (toolCall.function?.arguments) {
+                      accumulated.function.arguments = (accumulated.function.arguments || '') + toolCall.function.arguments;
+                    }
+                  }
+                  
+                  // 对于tool_calls，不立即输出，继续累积
+                  continue;
+                }
+                
                 // 如果有finish_reason，说明流已结束
                 if (choice.finish_reason) {
-                  // 如果还有最后的内容或tool_calls，先yield它
-                  if ((choice.delta?.content && choice.delta.content.trim()) || 
-                      (choice.delta?.tool_calls && choice.delta.tool_calls.length > 0)) {
+                  // 输出最后的内容（如果有）
+                  if (choice.delta?.content && choice.delta.content.trim()) {
                     yield fromQwenStreamResponse(chunk);
+                  }
+                  
+                  // 输出累积的tool_calls（如果有）
+                  if (accumulatedToolCalls.size > 0) {
+                    yield this.createToolCallResponse(accumulatedToolCalls);
                   }
                   return;
                 }
                 
-                // 处理有内容或tool_calls的块
-                if ((choice.delta?.content && choice.delta.content.trim()) ||
-                    (choice.delta?.tool_calls && choice.delta.tool_calls.length > 0)) {
+                // 处理普通文本内容（立即流式输出）
+                if (choice.delta?.content && choice.delta.content.trim()) {
                   yield fromQwenStreamResponse(chunk);
                 }
               }
@@ -244,5 +291,32 @@ export class QwenContentGenerator implements ContentGenerator {
     } finally {
       reader.releaseLock();
     }
+  }
+
+  /**
+   * 创建tool call响应
+   */
+  private createToolCallResponse(
+    accumulatedToolCalls: Map<string, any>
+  ): GenerateContentResponse {
+    const toolCallsArray = Array.from(accumulatedToolCalls.values());
+    
+    // 创建模拟的Qwen响应格式
+    const mockQwenResponse = {
+      choices: [{
+        delta: {
+          tool_calls: toolCallsArray.map(toolCall => ({
+            id: toolCall.id,
+            type: toolCall.type,
+            function: {
+              name: toolCall.function.name,
+              arguments: toolCall.function.arguments
+            }
+          }))
+        }
+      }]
+    };
+    
+    return fromQwenStreamResponse(mockQwenResponse);
   }
 } 

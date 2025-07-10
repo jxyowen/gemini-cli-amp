@@ -270,20 +270,28 @@ export function fromQwenStreamResponse(qwenChunk: any): GenerateContentResponse 
   const parts: any[] = content ? [{ text: content }] : [];
   const functionCalls: any[] = [];
 
-  // 处理tool_calls（流式响应中也可能包含）
+  // 处理tool_calls（现在应该是完整的累积数据）
   if (delta.tool_calls && delta.tool_calls.length > 0) {
-    console.debug('[DEBUG] 流式响应中检测到tool_calls:', delta.tool_calls.length, '个');
+    console.debug('[DEBUG] 流式响应中检测到完整tool_calls:', delta.tool_calls.length, '个');
     
     for (const toolCall of delta.tool_calls) {
-      console.debug('[DEBUG] 处理流式tool_call:', JSON.stringify(toolCall, null, 2));
+      console.debug('[DEBUG] 处理完整tool_call:', JSON.stringify(toolCall, null, 2));
       
       let args = {};
       if (toolCall.function?.arguments) {
         try {
+          // 现在arguments应该是完整的，可以安全解析
           args = JSON.parse(toolCall.function.arguments);
+          console.debug('[DEBUG] 成功解析tool_call参数:', JSON.stringify(args, null, 2));
         } catch (error) {
-          console.warn(`Failed to parse streaming tool call arguments: ${toolCall.function.arguments}`, error);
-          args = {}; // 使用空对象作为fallback
+          console.error(`解析tool call参数失败: ${toolCall.function.arguments}`, error);
+          // 如果解析失败，尝试作为字符串处理
+          try {
+            // 可能参数本身就是一个字符串，尝试包装成对象
+            args = { value: toolCall.function.arguments };
+          } catch {
+            args = {}; // 最后的fallback
+          }
         }
       }
       
@@ -293,7 +301,7 @@ export function fromQwenStreamResponse(qwenChunk: any): GenerateContentResponse 
         args,
       };
       
-      console.debug('[DEBUG] 生成的流式functionCall:', JSON.stringify(functionCall, null, 2));
+      console.debug('[DEBUG] 生成的完整functionCall:', JSON.stringify(functionCall, null, 2));
       
       // 添加到parts数组中（用于GenerateContentResponse的标准格式）
       parts.push({ functionCall });
