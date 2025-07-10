@@ -68,6 +68,11 @@ export interface TelemetrySettings {
   logPrompts?: boolean;
 }
 
+export interface ActiveExtension {
+  name: string;
+  version: string;
+}
+
 export class MCPServerConfig {
   constructor(
     // For stdio transport
@@ -100,7 +105,8 @@ export interface SandboxConfig {
 export type FlashFallbackHandler = (
   currentModel: string,
   fallbackModel: string,
-) => Promise<boolean>;
+  error?: unknown,
+) => Promise<boolean | string | null>;
 
 export interface ConfigParameters {
   sessionId: string;
@@ -135,6 +141,8 @@ export interface ConfigParameters {
   bugCommand?: BugCommandSettings;
   model: string;
   extensionContextFilePaths?: string[];
+  listExtensions?: boolean;
+  activeExtensions?: ActiveExtension[];
 }
 
 export class Config {
@@ -174,7 +182,10 @@ export class Config {
   private readonly model: string;
   private readonly extensionContextFilePaths: string[];
   private modelSwitchedDuringSession: boolean = false;
+  private readonly listExtensions: boolean;
+  private readonly _activeExtensions: ActiveExtension[];
   flashFallbackHandler?: FlashFallbackHandler;
+  private quotaErrorOccurred: boolean = false;
 
   constructor(params: ConfigParameters) {
     this.sessionId = params.sessionId;
@@ -216,6 +227,8 @@ export class Config {
     this.bugCommand = params.bugCommand;
     this.model = params.model;
     this.extensionContextFilePaths = params.extensionContextFilePaths ?? [];
+    this.listExtensions = params.listExtensions ?? false;
+    this._activeExtensions = params.activeExtensions ?? [];
 
     if (params.contextFileName) {
       setGeminiMdFilename(params.contextFileName);
@@ -296,6 +309,14 @@ export class Config {
 
   setFlashFallbackHandler(handler: FlashFallbackHandler): void {
     this.flashFallbackHandler = handler;
+  }
+
+  setQuotaErrorOccurred(value: boolean): void {
+    this.quotaErrorOccurred = value;
+  }
+
+  getQuotaErrorOccurred(): boolean {
+    return this.quotaErrorOccurred;
   }
 
   getEmbeddingModel(): string {
@@ -450,6 +471,14 @@ export class Config {
 
   getExtensionContextFilePaths(): string[] {
     return this.extensionContextFilePaths;
+  }
+
+  getListExtensions(): boolean {
+    return this.listExtensions;
+  }
+
+  getActiveExtensions(): ActiveExtension[] {
+    return this._activeExtensions;
   }
 
   async getGitService(): Promise<GitService> {
