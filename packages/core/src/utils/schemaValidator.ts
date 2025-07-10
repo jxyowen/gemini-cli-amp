@@ -7,7 +7,8 @@
 import { Schema } from '@google/genai';
 import Ajv from 'ajv';
 
-const ajValidator = new Ajv();
+// AJV 8.x 在 ES modules 中需要特殊处理
+const ajValidator = new (Ajv as any)();
 
 /**
  * Simple utility to validate objects against JSON Schemas
