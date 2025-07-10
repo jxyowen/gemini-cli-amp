@@ -221,15 +221,17 @@ export class QwenContentGenerator implements ContentGenerator {
                 
                 // 如果有finish_reason，说明流已结束
                 if (choice.finish_reason) {
-                  // 如果还有最后的内容，先yield它
-                  if (choice.delta?.content && choice.delta.content.trim()) {
+                  // 如果还有最后的内容或tool_calls，先yield它
+                  if ((choice.delta?.content && choice.delta.content.trim()) || 
+                      (choice.delta?.tool_calls && choice.delta.tool_calls.length > 0)) {
                     yield fromQwenStreamResponse(chunk);
                   }
                   return;
                 }
                 
-                // 只处理有非空内容的块
-                if (choice.delta?.content && choice.delta.content.trim()) {
+                // 处理有内容或tool_calls的块
+                if ((choice.delta?.content && choice.delta.content.trim()) ||
+                    (choice.delta?.tool_calls && choice.delta.tool_calls.length > 0)) {
                   yield fromQwenStreamResponse(chunk);
                 }
               }

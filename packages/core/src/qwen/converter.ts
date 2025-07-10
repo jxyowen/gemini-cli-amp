@@ -192,10 +192,20 @@ export function fromQwenGenerateResponse(qwenResponse: QwenGenerateResponse): Ge
   // 处理tool_calls
   if (choice?.message?.tool_calls && choice.message.tool_calls.length > 0) {
     for (const toolCall of choice.message.tool_calls) {
+      let args = {};
+      if (toolCall.function.arguments) {
+        try {
+          args = JSON.parse(toolCall.function.arguments);
+        } catch (error) {
+          console.warn(`Failed to parse tool call arguments: ${toolCall.function.arguments}`, error);
+          args = {}; // 使用空对象作为fallback
+        }
+      }
+      
       const functionCall = {
         id: toolCall.id || `${toolCall.function.name}-${Date.now()}`,
         name: toolCall.function.name,
-        args: toolCall.function.arguments ? JSON.parse(toolCall.function.arguments) : {},
+        args,
       };
       
       // 添加到parts数组中（用于GenerateContentResponse的标准格式）
@@ -248,10 +258,20 @@ export function fromQwenStreamResponse(qwenChunk: any): GenerateContentResponse 
   // 处理tool_calls（流式响应中也可能包含）
   if (delta.tool_calls && delta.tool_calls.length > 0) {
     for (const toolCall of delta.tool_calls) {
+      let args = {};
+      if (toolCall.function?.arguments) {
+        try {
+          args = JSON.parse(toolCall.function.arguments);
+        } catch (error) {
+          console.warn(`Failed to parse streaming tool call arguments: ${toolCall.function.arguments}`, error);
+          args = {}; // 使用空对象作为fallback
+        }
+      }
+      
       const functionCall = {
         id: toolCall.id || `${toolCall.function?.name || 'unknown'}-${Date.now()}`,
         name: toolCall.function?.name || '',
-        args: toolCall.function?.arguments ? JSON.parse(toolCall.function.arguments) : {},
+        args,
       };
       
       // 添加到parts数组中（用于GenerateContentResponse的标准格式）

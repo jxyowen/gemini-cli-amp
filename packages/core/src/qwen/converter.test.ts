@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   fromQwenGenerateResponse,
   fromQwenStreamResponse,
@@ -54,6 +54,95 @@ describe('Qwen Converter tool_calls support', () => {
         id: 'call_abc123',
         name: 'get_weather',
         args: { location: '北京' }
+      });
+    });
+
+    it('should handle tool_calls with invalid JSON arguments', () => {
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      
+      const qwenResponse: QwenGenerateResponse = {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: '',
+              tool_calls: [
+                {
+                  id: 'call_invalid',
+                  type: 'function',
+                  function: {
+                    name: 'test_tool',
+                    arguments: '{"invalid": json}' // 无效的JSON
+                  }
+                }
+              ]
+            },
+            finish_reason: 'tool_calls',
+            index: 0
+          }
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        id: 'test-id',
+        object: 'chat.completion',
+        created: Date.now(),
+        model: 'qwen-plus'
+      };
+
+      const result = fromQwenGenerateResponse(qwenResponse);
+
+      expect((result as any).functionCalls).toBeDefined();
+      expect((result as any).functionCalls).toHaveLength(1);
+      expect((result as any).functionCalls[0]).toEqual({
+        id: 'call_invalid',
+        name: 'test_tool',
+        args: {} // 应该fallback到空对象
+      });
+      
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to parse tool call arguments'),
+        expect.any(Error)
+      );
+      
+      consoleSpy.mockRestore();
+    });
+
+    it('should handle tool_calls with empty arguments', () => {
+      const qwenResponse: QwenGenerateResponse = {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: '',
+              tool_calls: [
+                {
+                  id: 'call_empty',
+                  type: 'function',
+                  function: {
+                    name: 'test_tool',
+                    arguments: '' // 空字符串
+                  }
+                }
+              ]
+            },
+            finish_reason: 'tool_calls',
+            index: 0
+          }
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        id: 'test-id',
+        object: 'chat.completion',
+        created: Date.now(),
+        model: 'qwen-plus'
+      };
+
+      const result = fromQwenGenerateResponse(qwenResponse);
+
+      expect((result as any).functionCalls).toBeDefined();
+      expect((result as any).functionCalls).toHaveLength(1);
+      expect((result as any).functionCalls[0]).toEqual({
+        id: 'call_empty',
+        name: 'test_tool',
+        args: {} // 应该是空对象
       });
     });
 
@@ -178,6 +267,48 @@ describe('Qwen Converter tool_calls support', () => {
         name: 'search_web',
         args: { query: 'OpenAI tool calling' }
       });
+    });
+
+    it('should handle tool_calls with invalid JSON in streaming response', () => {
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      
+      const qwenChunk = {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  id: 'call_stream_invalid',
+                  type: 'function',
+                  function: {
+                    name: 'test_tool',
+                    arguments: '{"broken": json syntax}' // 无效JSON
+                  }
+                }
+              ]
+            },
+            finish_reason: 'tool_calls',
+            index: 0
+          }
+        ]
+      };
+
+      const result = fromQwenStreamResponse(qwenChunk);
+
+      expect((result as any).functionCalls).toBeDefined();
+      expect((result as any).functionCalls).toHaveLength(1);
+      expect((result as any).functionCalls[0]).toEqual({
+        id: 'call_stream_invalid',
+        name: 'test_tool',
+        args: {} // 应该fallback到空对象
+      });
+      
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to parse streaming tool call arguments'),
+        expect.any(Error)
+      );
+      
+      consoleSpy.mockRestore();
     });
 
     it('should handle streaming response without tool_calls', () => {
