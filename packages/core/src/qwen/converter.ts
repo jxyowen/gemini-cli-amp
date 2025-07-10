@@ -20,6 +20,14 @@ import {
 export interface QwenMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  tool_calls?: Array<{
+    id: string;
+    type: 'function';
+    function: {
+      name: string;
+      arguments: string;
+    };
+  }>;
 }
 
 export interface QwenGenerateRequest {
@@ -177,23 +185,52 @@ export function fromQwenGenerateResponse(qwenResponse: QwenGenerateResponse): Ge
   const choice = qwenResponse.choices?.[0];
   const text = choice?.message?.content || '';
   
-  const response = new GenerateContentResponse();
-  response.candidates = [
-    {
-      content: {
-        role: 'model',
-        parts: [{ text }],
-      },
-      finishReason: (choice?.finish_reason || 'STOP') as FinishReason,
-      index: 0,
+  // 处理基本响应
+  const parts: any[] = text ? [{ text }] : [];
+  const functionCalls: any[] = [];
+  
+  // 处理tool_calls
+  if (choice?.message?.tool_calls && choice.message.tool_calls.length > 0) {
+    for (const toolCall of choice.message.tool_calls) {
+      const functionCall = {
+        id: toolCall.id || `${toolCall.function.name}-${Date.now()}`,
+        name: toolCall.function.name,
+        args: toolCall.function.arguments ? JSON.parse(toolCall.function.arguments) : {},
+      };
+      
+      // 添加到parts数组中（用于GenerateContentResponse的标准格式）
+      parts.push({ functionCall });
+      
+      // 添加到functionCalls数组中（用于响应级别属性）
+      functionCalls.push(functionCall);
+    }
+  }
+
+  const candidate: any = {
+    content: {
+      role: 'model',
+      parts,
     },
-  ];
-  response.usageMetadata = {
-    promptTokenCount: qwenResponse.usage.prompt_tokens,
-    candidatesTokenCount: qwenResponse.usage.completion_tokens,
-    totalTokenCount: qwenResponse.usage.total_tokens,
+    finishReason: (choice?.finish_reason || 'STOP') as FinishReason,
+    index: 0,
   };
-  return response;
+
+  // 使用对象字面量创建响应，这样可以设置functionCalls属性
+  const response: any = {
+    candidates: [candidate],
+    usageMetadata: {
+      promptTokenCount: qwenResponse.usage.prompt_tokens,
+      candidatesTokenCount: qwenResponse.usage.completion_tokens,
+      totalTokenCount: qwenResponse.usage.total_tokens,
+    },
+  };
+  
+  // 如果有function calls，设置functionCalls属性
+  if (functionCalls.length > 0) {
+    response.functionCalls = functionCalls;
+  }
+  
+  return response as GenerateContentResponse;
 }
 
 /**
@@ -204,18 +241,47 @@ export function fromQwenStreamResponse(qwenChunk: any): GenerateContentResponse 
   const delta = choice?.delta || {};
   const content = delta.content || '';
   
-  const response = new GenerateContentResponse();
-  response.candidates = [
-    {
-      content: {
-        role: 'model',
-        parts: [{ text: content }],
-      },
-      finishReason: choice?.finish_reason as FinishReason,
-      index: 0,
+  // 处理基本响应
+  const parts: any[] = content ? [{ text: content }] : [];
+  const functionCalls: any[] = [];
+
+  // 处理tool_calls（流式响应中也可能包含）
+  if (delta.tool_calls && delta.tool_calls.length > 0) {
+    for (const toolCall of delta.tool_calls) {
+      const functionCall = {
+        id: toolCall.id || `${toolCall.function?.name || 'unknown'}-${Date.now()}`,
+        name: toolCall.function?.name || '',
+        args: toolCall.function?.arguments ? JSON.parse(toolCall.function.arguments) : {},
+      };
+      
+      // 添加到parts数组中（用于GenerateContentResponse的标准格式）
+      parts.push({ functionCall });
+      
+      // 添加到functionCalls数组中（用于响应级别属性）
+      functionCalls.push(functionCall);
+    }
+  }
+
+  const candidate: any = {
+    content: {
+      role: 'model',
+      parts,
     },
-  ];
-  return response;
+    finishReason: choice?.finish_reason as FinishReason,
+    index: 0,
+  };
+
+  // 使用对象字面量创建响应，这样可以设置functionCalls属性
+  const response: any = {
+    candidates: [candidate],
+  };
+  
+  // 如果有function calls，设置functionCalls属性
+  if (functionCalls.length > 0) {
+    response.functionCalls = functionCalls;
+  }
+  
+  return response as GenerateContentResponse;
 }
 
 /**
