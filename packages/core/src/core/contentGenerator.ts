@@ -62,6 +62,7 @@ export async function createContentGeneratorConfig(
   const geminiApiKey = process.env.GEMINI_API_KEY || undefined;
   const googleApiKey = process.env.GOOGLE_API_KEY || undefined;
   const googleCloudProject = process.env.GOOGLE_CLOUD_PROJECT || undefined;
+  const googleCloudLocation = process.env.GOOGLE_CLOUD_LOCATION || undefined;
   const qwenApiKey = process.env.QWEN_API_KEY || undefined;
 
   // Use runtime model from config if available, otherwise fallback to parameter or auth-specific default
