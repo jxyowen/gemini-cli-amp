@@ -68,6 +68,8 @@ export class QwenContentGenerator implements ContentGenerator {
       tools: qwenRequest.tools,
       response_format: qwenRequest.response_format,
       stream: false,
+      // 对于非流式调用，根据阿里云文档，不传递 enable_thinking 参数
+      // 这样可以避免 "parameter.enable_thinking must be set to false for non-streaming calls" 错误
     }, request.config?.abortSignal);
 
     return fromQwenGenerateResponse(response);
@@ -91,6 +93,8 @@ export class QwenContentGenerator implements ContentGenerator {
       tools: qwenRequest.tools,
       response_format: qwenRequest.response_format,
       stream: true,
+      // 对于流式调用，可以传递 enable_thinking 参数
+      ...(qwenRequest.enable_thinking !== undefined && { enable_thinking: qwenRequest.enable_thinking }),
     }, request.config?.abortSignal);
 
     return this.processStreamResponse(streamResponse);
