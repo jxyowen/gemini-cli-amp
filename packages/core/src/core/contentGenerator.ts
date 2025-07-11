@@ -14,6 +14,7 @@ import {
   GoogleGenAI,
 } from '@google/genai';
 import { createCodeAssistContentGenerator } from '../code_assist/codeAssist.js';
+import { Config } from '../config/config.js';
 import { DEFAULT_GEMINI_MODEL, DEFAULT_QWEN_MODEL, isQwenModel } from '../config/models.js';
 import { getEffectiveModel } from './modelCheck.js';
 import { QwenContentGenerator } from '../qwen/qwenContentGenerator.js';
@@ -118,6 +119,7 @@ export async function createContentGeneratorConfig(
 
 export async function createContentGenerator(
   config: ContentGeneratorConfig,
+  gcConfig: Config,
   sessionId?: string,
 ): Promise<ContentGenerator> {
   const version = process.env.CLI_VERSION || process.version;
@@ -140,6 +142,7 @@ export async function createContentGenerator(
     return createCodeAssistContentGenerator(
       httpOptions,
       config.authType,
+      gcConfig,
       sessionId,
     );
   }
