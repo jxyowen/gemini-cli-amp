@@ -235,12 +235,27 @@ export class QwenContentGenerator implements ContentGenerator {
                 
                 // 处理tool_calls累积
                 if (choice.delta?.tool_calls && choice.delta.tool_calls.length > 0) {
+                  // 仅在调试模式下输出详细日志
+                  if (process.env.DEBUG || process.env.DEBUG_MODE) {
+                    console.error('[DEBUG] 接收到tool_calls片段:', choice.delta.tool_calls.length, '个');
+                  }
+                  
                   for (const toolCall of choice.delta.tool_calls) {
-                    const toolCallId = toolCall.id || `tool_${toolCall.index || 0}`;
+                    // 使用index作为主要标识符（OpenAI流式格式），id作为备选
+                    const toolCallId = toolCall.index !== undefined ? 
+                      `tool_${toolCall.index}` : 
+                      (toolCall.id || `tool_${Date.now()}`);
+                    
+                    if (process.env.DEBUG || process.env.DEBUG_MODE) {
+                      console.error('[DEBUG] 处理tool_call片段:', JSON.stringify(toolCall, null, 2));
+                    }
                     
                     if (!accumulatedToolCalls.has(toolCallId)) {
+                      if (process.env.DEBUG || process.env.DEBUG_MODE) {
+                        console.error('[DEBUG] 创建新的tool_call累积器:', toolCallId);
+                      }
                       accumulatedToolCalls.set(toolCallId, {
-                        id: toolCallId,
+                        id: toolCall.id || toolCallId,  // 保存原始id或使用生成的id
                         type: toolCall.type || 'function',
                         function: {}
                       });
@@ -248,14 +263,32 @@ export class QwenContentGenerator implements ContentGenerator {
                     
                     const accumulated = accumulatedToolCalls.get(toolCallId)!;
                     
-                    // 累积function name
+                    // 累积function name（通常只在第一个片段中出现）
                     if (toolCall.function?.name) {
+                      if (process.env.DEBUG || process.env.DEBUG_MODE) {
+                        console.error('[DEBUG] 设置function name:', toolCall.function.name);
+                      }
                       accumulated.function.name = toolCall.function.name;
                     }
                     
-                    // 累积function arguments
+                    // 累积function arguments（每个片段可能都有部分内容）
                     if (toolCall.function?.arguments) {
-                      accumulated.function.arguments = (accumulated.function.arguments || '') + toolCall.function.arguments;
+                      const beforeArgs = accumulated.function.arguments || '';
+                      accumulated.function.arguments = beforeArgs + toolCall.function.arguments;
+                      if (process.env.DEBUG || process.env.DEBUG_MODE) {
+                        console.error('[DEBUG] 累积arguments:', {
+                          toolCallId,
+                          thisChunk: toolCall.function.arguments,
+                          beforeLength: beforeArgs.length,
+                          afterLength: accumulated.function.arguments.length,
+                          totalToolCalls: accumulatedToolCalls.size,
+                          accumulatedSoFar: accumulated.function.arguments
+                        });
+                      }
+                    }
+                    
+                    if (process.env.DEBUG || process.env.DEBUG_MODE) {
+                      console.error('[DEBUG] 当前累积状态:', JSON.stringify(accumulated, null, 2));
                     }
                   }
                   
@@ -302,18 +335,26 @@ export class QwenContentGenerator implements ContentGenerator {
     const parts: any[] = [];
     const functionCalls: any[] = [];
     
-    console.debug('[DEBUG] 开始处理累积的tool_calls:', accumulatedToolCalls.size, '个');
+    if (process.env.DEBUG || process.env.DEBUG_MODE) {
+      console.error('[DEBUG] 开始处理累积的tool_calls:', accumulatedToolCalls.size, '个');
+    }
     
     for (const toolCall of accumulatedToolCalls.values()) {
-      console.debug('[DEBUG] 处理累积的tool_call:', JSON.stringify(toolCall, null, 2));
+      if (process.env.DEBUG || process.env.DEBUG_MODE) {
+        console.error('[DEBUG] 处理累积的tool_call:', JSON.stringify(toolCall, null, 2));
+      }
       
       let args = {};
       if (toolCall.function.arguments) {
         try {
           // 现在在这里统一进行JSON解析，arguments应该是完整拼接后的字符串
-          console.debug('[DEBUG] 尝试解析完整的arguments:', toolCall.function.arguments);
+          if (process.env.DEBUG || process.env.DEBUG_MODE) {
+            console.error('[DEBUG] 尝试解析完整的arguments:', toolCall.function.arguments);
+          }
           args = JSON.parse(toolCall.function.arguments);
-          console.debug('[DEBUG] 成功解析tool_call参数:', JSON.stringify(args, null, 2));
+          if (process.env.DEBUG || process.env.DEBUG_MODE) {
+            console.error('[DEBUG] 成功解析tool_call参数:', JSON.stringify(args, null, 2));
+          }
         } catch (error) {
           console.error(`解析累积的tool call参数失败: ${toolCall.function.arguments}`, error);
           // 如果解析失败，尝试作为字符串处理
@@ -332,7 +373,9 @@ export class QwenContentGenerator implements ContentGenerator {
         args,
       };
       
-      console.debug('[DEBUG] 生成的最终functionCall:', JSON.stringify(functionCall, null, 2));
+      if (process.env.DEBUG || process.env.DEBUG_MODE) {
+        console.error('[DEBUG] 生成的最终functionCall:', JSON.stringify(functionCall, null, 2));
+      }
       
       // 添加到parts数组中（用于GenerateContentResponse的标准格式）
       parts.push({ functionCall });
@@ -358,7 +401,9 @@ export class QwenContentGenerator implements ContentGenerator {
     // 如果有function calls，设置functionCalls属性
     if (functionCalls.length > 0) {
       response.functionCalls = functionCalls;
-      console.debug('[DEBUG] 累积处理后的最终functionCalls:', JSON.stringify(functionCalls, null, 2));
+      if (process.env.DEBUG || process.env.DEBUG_MODE) {
+        console.error('[DEBUG] 累积处理后的最终functionCalls:', JSON.stringify(functionCalls, null, 2));
+      }
     }
     
     return response as GenerateContentResponse;

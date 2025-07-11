@@ -114,15 +114,46 @@ export function convertContentToQwenMessages(contents: Content[]): QwenMessage[]
   for (const content of contents) {
     const role = content.role === 'model' ? 'assistant' : content.role as 'user' | 'system';
     
-    // 合并所有文本部分
+    // 处理文本部分
     const textParts = content.parts
       ?.filter((part): part is Part & { text: string } => 'text' in part)
       .map(part => part.text) || [];
     
-    if (textParts.length > 0) {
+    // 处理functionResponse部分（工具响应）
+    const functionResponseParts = content.parts
+      ?.filter((part): part is Part & { functionResponse: any } => 'functionResponse' in part)
+      .map(part => {
+        const response = part.functionResponse;
+        if (response) {
+          // 格式化工具响应为可读文本
+          const responseText = typeof response.response === 'object' 
+            ? JSON.stringify(response.response, null, 2)
+            : String(response.response || '');
+          
+          return `Tool ${response.name || 'unknown'} (${response.id || 'no-id'}) executed successfully:\n${responseText}`;
+        }
+        return '';
+      }) || [];
+    
+    // 处理functionCall部分（工具调用请求）
+    const functionCallParts = content.parts
+      ?.filter((part): part is Part & { functionCall: any } => 'functionCall' in part)
+      .map(part => {
+        const functionCall = part.functionCall;
+        if (functionCall) {
+          // 这部分通常在assistant消息中，表示模型要调用工具
+          return `[Tool Call: ${functionCall.name || 'unknown'}]`;
+        }
+        return '';
+      }) || [];
+    
+    // 合并所有内容
+    const allParts = [...textParts, ...functionResponseParts, ...functionCallParts].filter(Boolean);
+    
+    if (allParts.length > 0) {
       messages.push({
         role,
-        content: textParts.join('\n'),
+        content: allParts.join('\n'),
       });
     }
   }
