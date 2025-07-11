@@ -66,6 +66,7 @@ export class QwenContentGenerator implements ContentGenerator {
       max_tokens: qwenRequest.max_tokens,
       stop: qwenRequest.stop,
       tools: qwenRequest.tools,
+      response_format: qwenRequest.response_format,
       stream: false,
     }, request.config?.abortSignal);
 
@@ -88,6 +89,7 @@ export class QwenContentGenerator implements ContentGenerator {
       max_tokens: qwenRequest.max_tokens,
       stop: qwenRequest.stop,
       tools: qwenRequest.tools,
+      response_format: qwenRequest.response_format,
       stream: true,
     }, request.config?.abortSignal);
 

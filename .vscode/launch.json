@@ -12,6 +12,7 @@
       "runtimeArgs": ["run", "start"],
       "skipFiles": ["<node_internals>/**"],
       "cwd": "${workspaceFolder}",
+//      "cwd": "/Users/jxyowen/Projects/gitlab/api-management-v2-aliyun-com",
       "console": "integratedTerminal",
       "env": {
         "GEMINI_SANDBOX": "false"

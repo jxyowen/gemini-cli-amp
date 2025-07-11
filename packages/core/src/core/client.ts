@@ -324,6 +324,10 @@ export class GeminiClient {
     // Use current model from config instead of hardcoded Flash model
     const modelToUse =
       model || this.config.getModel() || DEFAULT_GEMINI_FLASH_MODEL;
+    
+            console.debug(`[DEBUG] generateJson: Using model: ${modelToUse}`);
+    console.debug(`[DEBUG] generateJson: Schema: ${JSON.stringify(schema)}`);
+    
     try {
       const userMemory = this.config.getUserMemory();
       const systemInstruction = getCoreSystemPrompt(userMemory);
@@ -332,6 +336,8 @@ export class GeminiClient {
         ...this.generateContentConfig,
         ...config,
       };
+
+      console.debug('[DEBUG] generateJson: Making API call with JSON schema');
 
       const apiCall = () =>
         this.getContentGenerator().generateContent({
@@ -352,6 +358,8 @@ export class GeminiClient {
       });
 
       const text = getResponseText(result);
+      console.debug('[DEBUG] generateJson: Raw response text:', text);
+      
       if (!text) {
         const error = new Error(
           'API returned an empty response for generateJson.',
@@ -365,8 +373,41 @@ export class GeminiClient {
         throw error;
       }
       try {
-        return JSON.parse(text);
+        const parsed = JSON.parse(text);
+        console.debug('[DEBUG] generateJson: Successfully parsed JSON:', parsed);
+        return parsed;
       } catch (parseError) {
+        console.error('[DEBUG] generateJson: JSON parse failed for text:', text);
+        console.error('[DEBUG] generateJson: Parse error:', parseError);
+        
+        // 尝试清理文本并重新解析（针对Qwen模型可能返回包装的JSON）
+        const cleanedText = text.trim();
+        if (cleanedText.startsWith('```json') && cleanedText.endsWith('```')) {
+          try {
+            const extractedJson = cleanedText.slice(7, -3).trim();
+            console.debug('[DEBUG] generateJson: Trying to parse extracted JSON:', extractedJson);
+            const parsed = JSON.parse(extractedJson);
+            console.debug('[DEBUG] generateJson: Successfully parsed extracted JSON:', parsed);
+            return parsed;
+          } catch (extractError) {
+            console.error('[DEBUG] generateJson: Failed to parse extracted JSON:', extractError);
+          }
+        }
+        
+        // 尝试提取JSON内容（可能包含额外文本）
+        const jsonMatch = text.match(/\{.*\}/s);
+        if (jsonMatch && jsonMatch[0]) {
+          try {
+            const extracted = jsonMatch[0];
+            console.debug('[DEBUG] generateJson: Trying to parse matched JSON:', extracted);
+            const parsed = JSON.parse(extracted);
+            console.debug('[DEBUG] generateJson: Successfully parsed matched JSON:', parsed);
+            return parsed;
+          } catch (matchError) {
+            console.error('[DEBUG] generateJson: Failed to parse matched JSON:', matchError);
+          }
+        }
+        
         await reportError(
           parseError,
           'Failed to parse JSON response from generateJson.',
@@ -377,7 +418,7 @@ export class GeminiClient {
           'generateJson-parse',
         );
         throw new Error(
-          `Failed to parse API response as JSON: ${getErrorMessage(parseError)}`,
+          `Failed to parse API response as JSON: ${getErrorMessage(parseError)}. Response text: ${text}`,
         );
       }
     } catch (error) {
@@ -393,6 +434,8 @@ export class GeminiClient {
         throw error;
       }
 
+      console.error('[DEBUG] generateJson: API call failed:', error);
+      
       await reportError(
         error,
         'Error generating JSON content via API.',

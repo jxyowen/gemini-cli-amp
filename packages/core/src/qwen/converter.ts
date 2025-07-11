@@ -39,6 +39,9 @@ export interface QwenGenerateRequest {
   max_tokens?: number;
   stop?: string[];
   tools?: QwenTool[];
+  response_format?: {
+    type: 'json_object';
+  };
 }
 
 export interface QwenGenerateResponse {
@@ -170,11 +173,37 @@ export function toQwenGenerateRequest(
 ): QwenGenerateRequest {
   const messages = convertContentToQwenMessages(toContents(params.contents));
   
+  // 检查是否需要JSON响应格式
+  const needsJsonResponse = params.config?.responseMimeType === 'application/json' || 
+                           params.config?.responseSchema;
+  
+  // 如果需要JSON响应，根据阿里云文档要求处理
+  if (needsJsonResponse && messages.length > 0) {
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage.role === 'user') {
+      // 确保提示词中包含"json"关键词（阿里云文档要求）
+      let jsonInstruction = '\n\nPlease respond in JSON format.';
+      
+      if (params.config?.responseSchema) {
+        jsonInstruction += `\n\nYour JSON response must conform to this schema:\n${JSON.stringify(params.config.responseSchema, null, 2)}`;
+      }
+      
+      lastMessage.content += jsonInstruction;
+    }
+  }
+  
   const request: QwenGenerateRequest = {
     model: params.model,
     messages,
     stream,
   };
+
+  // 设置JSON响应格式（根据阿里云文档）
+  if (needsJsonResponse) {
+    request.response_format = {
+      type: 'json_object'
+    };
+  }
 
   // 转换生成配置
   if (params.config) {

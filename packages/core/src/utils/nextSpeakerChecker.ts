@@ -8,6 +8,7 @@ import { Content, SchemaUnion, Type } from '@google/genai';
 import { GeminiClient } from '../core/client.js';
 import { GeminiChat } from '../core/geminiChat.js';
 import { isFunctionResponse } from './messageInspectors.js';
+import { isQwenModel } from '../config/models.js';
 
 const CHECK_PROMPT = `Analyze *only* the content and structure of your immediately preceding response (your last turn in the conversation history). Based *strictly* on that response, determine who should logically speak next: the 'user' or the 'model' (you).
 **Decision Rules (apply in order):**
@@ -121,17 +122,83 @@ export async function checkNextSpeaker(
     return null;
   }
 
+  // 获取当前模型并检查是否为Qwen模型
+  const currentModel = geminiClient.getContentGenerator().constructor.name;
+  const configModel = (geminiClient as any).config?.getModel?.() || '';
+  
+  console.debug('[DEBUG] checkNextSpeaker: Current model:', currentModel, 'Config model:', configModel);
+  
+  // 为Qwen模型提供简化的逻辑，避免JSON调用
+  if (isQwenModel(configModel) || currentModel.includes('Qwen')) {
+    console.debug('[DEBUG] checkNextSpeaker: Using simplified logic for Qwen model');
+    
+    // 简化的规则：检查最后一条模型消息的内容
+    const lastModelContent = lastMessage.parts
+      ?.map(part => 'text' in part ? part.text : '')
+      .join(' ')
+      .trim() || '';
+    
+    // 如果消息以问号结尾，让用户回答
+    if (lastModelContent.endsWith('?')) {
+      return {
+        reasoning: 'Last model message ended with a question, user should respond',
+        next_speaker: 'user',
+      };
+    }
+    
+    // 如果消息包含明确的继续指示词
+    const continueIndicators = [
+      'Next, I will',
+      'Now I\'ll',
+      'Moving on to',
+      'Let me',
+      'I\'ll now',
+      'I will now',
+      'Continuing',
+      'Processing',
+    ];
+    
+    if (continueIndicators.some(indicator => 
+      lastModelContent.includes(indicator)
+    )) {
+      return {
+        reasoning: 'Model message indicates continuation, model should speak next',
+        next_speaker: 'model',
+      };
+    }
+    
+    // 如果消息看起来不完整（没有结束标点符号）
+    if (lastModelContent.length > 0 && 
+        !lastModelContent.match(/[.!?。！？]$/)) {
+      return {
+        reasoning: 'Model message appears incomplete, model should continue',
+        next_speaker: 'model',
+      };
+    }
+    
+    // 默认情况下，让用户继续对话
+    return {
+      reasoning: 'Model message completed, user should speak next',
+      next_speaker: 'user',
+    };
+  }
+
+  // 对于Gemini模型，继续使用原来的JSON调用逻辑
   const contents: Content[] = [
     ...curatedHistory,
     { role: 'user', parts: [{ text: CHECK_PROMPT }] },
   ];
 
   try {
+    console.debug('[DEBUG] checkNextSpeaker: Attempting to call generateJson for Gemini model');
+    
     const parsedResponse = (await geminiClient.generateJson(
       contents,
       RESPONSE_SCHEMA,
       abortSignal,
     )) as unknown as NextSpeakerResponse;
+
+    console.debug('[DEBUG] checkNextSpeaker: Received response:', parsedResponse);
 
     if (
       parsedResponse &&
@@ -140,12 +207,20 @@ export async function checkNextSpeaker(
     ) {
       return parsedResponse;
     }
+    
+    console.warn('[DEBUG] checkNextSpeaker: Invalid response format:', parsedResponse);
     return null;
   } catch (error) {
     console.warn(
-      'Failed to talk to Gemini endpoint when seeing if conversation should continue.',
+      'Failed to talk to API endpoint when seeing if conversation should continue.',
       error,
     );
-    return null;
+    
+    // 为Gemini模型也提供fallback
+    console.debug('[DEBUG] checkNextSpeaker: Using fallback - defaulting to user speaker');
+    return {
+      reasoning: 'API call failed, defaulting to user turn for safety',
+      next_speaker: 'user',
+    };
   }
 }

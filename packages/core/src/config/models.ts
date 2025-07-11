@@ -9,12 +9,13 @@ export const DEFAULT_GEMINI_FLASH_MODEL = 'gemini-2.5-flash';
 export const DEFAULT_GEMINI_EMBEDDING_MODEL = 'gemini-embedding-001';
 
 // 通义千问模型配置
-export const DEFAULT_QWEN_MODEL = 'qwen-max';
+export const DEFAULT_QWEN_MODEL = 'qwen3-235b-a22b';
 export const QWEN_MODELS = [
   'qwen-max',
   'qwen-plus', 
   'qwen-turbo',
   'qwen-long',
+  'qwen3-235b-a22b'
 ] as const;
 
 export const GEMINI_MODELS = [
