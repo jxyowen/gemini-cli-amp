@@ -211,11 +211,21 @@ export class QwenContentGenerator implements ContentGenerator {
         arguments?: string;
       };
     }>();
+    
+    let hasOutputToolCalls = false; // 跟踪是否已经输出了工具调用
 
     try {
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          // 流正常结束，如果有累积的tool_calls且未输出，立即输出
+          if (accumulatedToolCalls.size > 0 && !hasOutputToolCalls) {
+            console.debug('[DEBUG] 流结束时输出累积的tool_calls');
+            yield this.createToolCallResponse(accumulatedToolCalls);
+            hasOutputToolCalls = true;
+          }
+          break;
+        }
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
@@ -226,9 +236,11 @@ export class QwenContentGenerator implements ContentGenerator {
           if (line.startsWith('data: ')) {
             const data = line.slice(6).trim(); 
             if (data === '[DONE]') {
-              // 流结束，如果有累积的tool_calls，输出最终结果
-              if (accumulatedToolCalls.size > 0) {
+              // 流结束，如果有累积的tool_calls且未输出，输出最终结果
+              if (accumulatedToolCalls.size > 0 && !hasOutputToolCalls) {
+                console.debug('[DEBUG] [DONE]时输出累积的tool_calls');
                 yield this.createToolCallResponse(accumulatedToolCalls);
+                hasOutputToolCalls = true;
               }
               return;
             }
@@ -298,7 +310,21 @@ export class QwenContentGenerator implements ContentGenerator {
                     }
                   }
                   
-                  // 对于tool_calls，不立即输出，继续累积
+                  // 检查是否所有工具调用都完整了（有name和完整的arguments）
+                  const allToolCallsComplete = Array.from(accumulatedToolCalls.values()).every(toolCall => {
+                    return toolCall.function.name && 
+                           toolCall.function.arguments && 
+                           this.isValidJson(toolCall.function.arguments);
+                  });
+                  
+                  // 如果所有工具调用都完整了，立即输出
+                  if (allToolCallsComplete && accumulatedToolCalls.size > 0 && !hasOutputToolCalls) {
+                    console.debug('[DEBUG] 所有工具调用完整，立即输出');
+                    yield this.createToolCallResponse(accumulatedToolCalls);
+                    hasOutputToolCalls = true;
+                  }
+                  
+                  // 对于tool_calls，不立即输出普通内容，继续累积
                   continue;
                 }
                 
@@ -309,9 +335,11 @@ export class QwenContentGenerator implements ContentGenerator {
                     yield fromQwenStreamResponse(chunk);
                   }
                   
-                  // 输出累积的tool_calls（如果有）
-                  if (accumulatedToolCalls.size > 0) {
+                  // 输出累积的tool_calls（如果有且未输出）
+                  if (accumulatedToolCalls.size > 0 && !hasOutputToolCalls) {
+                    console.debug('[DEBUG] finish_reason时输出累积的tool_calls');
                     yield this.createToolCallResponse(accumulatedToolCalls);
+                    hasOutputToolCalls = true;
                   }
                   return;
                 }
@@ -327,9 +355,50 @@ export class QwenContentGenerator implements ContentGenerator {
           }
         }
       }
+    } catch (error) {
+      // 异常情况下，确保工具调用被输出
+      if (accumulatedToolCalls.size > 0 && !hasOutputToolCalls) {
+        console.debug('[DEBUG] 异常情况下输出累积的tool_calls');
+        try {
+          yield this.createToolCallResponse(accumulatedToolCalls);
+        } catch (outputError) {
+          console.error('[DEBUG] 输出工具调用时发生错误:', outputError);
+        }
+      }
+      throw error;
     } finally {
       reader.releaseLock();
     }
+  }
+  
+  /**
+   * 检查字符串是否为有效的JSON
+   */
+  private isValidJson(str: string): boolean {
+    try {
+      JSON.parse(str);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  
+  /**
+   * 检查工具调用是否足够完整可以执行
+   */
+  private isToolCallReady(toolCall: any): boolean {
+    // 必须有function name
+    if (!toolCall.function?.name) {
+      return false;
+    }
+    
+    // 如果没有arguments，认为是无参数调用，也是完整的
+    if (!toolCall.function.arguments) {
+      return true;
+    }
+    
+    // 如果有arguments，必须是有效的JSON
+    return this.isValidJson(toolCall.function.arguments);
   }
 
   /**
@@ -341,47 +410,106 @@ export class QwenContentGenerator implements ContentGenerator {
     const parts: any[] = [];
     const functionCalls: any[] = [];
     
-    if (process.env.DEBUG || process.env.DEBUG_MODE) {
-      console.error('[DEBUG] 开始处理累积的tool_calls:', accumulatedToolCalls.size, '个');
+    console.debug(`[DEBUG] 开始处理累积的tool_calls: ${accumulatedToolCalls.size} 个`);
+    
+    // 过滤出足够完整的工具调用
+    const readyToolCalls = Array.from(accumulatedToolCalls.values()).filter(toolCall => {
+      const isReady = this.isToolCallReady(toolCall);
+      if (!isReady) {
+        console.warn(`[WARN] 工具调用不完整，跳过: ${JSON.stringify({
+          id: toolCall.id,
+          name: toolCall.function?.name || 'unknown',
+          hasArguments: !!toolCall.function?.arguments,
+          argumentsLength: toolCall.function?.arguments?.length || 0
+        })}`);
+      }
+      return isReady;
+    });
+    
+    if (readyToolCalls.length === 0) {
+      console.warn('[WARN] 没有完整的工具调用可以处理');
+      // 返回一个空的响应，而不是抛出错误
+      return {
+        candidates: [{
+          content: {
+            role: 'model',
+            parts: [{ text: '' }],
+          },
+          finishReason: 'STOP',
+          index: 0,
+        }],
+      } as GenerateContentResponse;
     }
     
-    for (const toolCall of accumulatedToolCalls.values()) {
-      if (process.env.DEBUG || process.env.DEBUG_MODE) {
-        console.error('[DEBUG] 处理累积的tool_call:', JSON.stringify(toolCall, null, 2));
-      }
+    console.debug(`[DEBUG] 处理 ${readyToolCalls.length} 个完整的工具调用`);
+    
+    for (const toolCall of readyToolCalls) {
+      console.debug(`[DEBUG] 处理工具调用: ${JSON.stringify({
+        id: toolCall.id,
+        name: toolCall.function?.name,
+        argumentsLength: toolCall.function?.arguments?.length || 0
+      })}`);
       
       let args = {};
+      
+      // 处理arguments
       if (toolCall.function.arguments) {
         try {
-          // 现在在这里统一进行JSON解析，arguments应该是完整拼接后的字符串
-          if (process.env.DEBUG || process.env.DEBUG_MODE) {
-            console.error('[DEBUG] 尝试解析完整的arguments:', toolCall.function.arguments);
-          }
+          console.debug(`[DEBUG] 尝试解析arguments: ${toolCall.function.arguments.substring(0, 100)}${toolCall.function.arguments.length > 100 ? '...' : ''}`);
           args = JSON.parse(toolCall.function.arguments);
-          if (process.env.DEBUG || process.env.DEBUG_MODE) {
-            console.error('[DEBUG] 成功解析tool_call参数:', JSON.stringify(args, null, 2));
-          }
+          console.debug(`[DEBUG] 成功解析tool_call参数: ${JSON.stringify(args)}`);
         } catch (error) {
-          console.error(`解析累积的tool call参数失败: ${toolCall.function.arguments}`, error);
-          // 如果解析失败，尝试作为字符串处理
+          console.error(`[ERROR] 解析tool call参数失败: ${toolCall.function.arguments}`, error);
+          
+          // 尝试修复常见的JSON格式问题
+          let fixedArgs = toolCall.function.arguments.trim();
+          
+          // 尝试移除可能的不完整结尾
+          if (fixedArgs.endsWith(',') || fixedArgs.endsWith('",')) {
+            fixedArgs = fixedArgs.replace(/,\s*$/, '');
+          }
+          
+          // 尝试补全不完整的JSON
+          if (fixedArgs.startsWith('{') && !fixedArgs.endsWith('}')) {
+            fixedArgs += '}';
+          }
+          if (fixedArgs.startsWith('[') && !fixedArgs.endsWith(']')) {
+            fixedArgs += ']';
+          }
+          
           try {
-            // 可能参数本身就是一个字符串，尝试包装成对象
-            args = { value: toolCall.function.arguments };
-          } catch {
-            args = {}; // 最后的fallback
+            args = JSON.parse(fixedArgs);
+            console.debug(`[DEBUG] 修复后成功解析参数: ${JSON.stringify(args)}`);
+          } catch (fixError) {
+            console.error(`[ERROR] 修复后仍无法解析参数: ${fixedArgs}`, fixError);
+            // 最后的fallback：将原始字符串作为单个参数
+            if (toolCall.function.arguments.trim()) {
+              args = { _raw_arguments: toolCall.function.arguments };
+            } else {
+              args = {};
+            }
           }
         }
+      } else {
+        // 无参数的工具调用
+        console.debug(`[DEBUG] 无参数工具调用: ${toolCall.function.name}`);
+        args = {};
       }
       
+      // 确保有有效的function name
+      const functionName = toolCall.function?.name || 'unknown_function';
+      
       const functionCall = {
-        id: toolCall.id || `${toolCall.function?.name || 'unknown'}-${Date.now()}`,
-        name: toolCall.function?.name || '',
+        id: toolCall.id || `${functionName}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        name: functionName,
         args,
       };
       
-      if (process.env.DEBUG || process.env.DEBUG_MODE) {
-        console.error('[DEBUG] 生成的最终functionCall:', JSON.stringify(functionCall, null, 2));
-      }
+      console.debug(`[DEBUG] 生成的最终functionCall: ${JSON.stringify({
+        id: functionCall.id,
+        name: functionCall.name,
+        argsKeys: Object.keys(functionCall.args)
+      })}`);
       
       // 添加到parts数组中（用于GenerateContentResponse的标准格式）
       parts.push({ functionCall });
@@ -404,13 +532,17 @@ export class QwenContentGenerator implements ContentGenerator {
       candidates: [candidate],
     };
     
-    // 如果有function calls，设置functionCalls属性
+    // 设置functionCalls属性（这是关键！）
     if (functionCalls.length > 0) {
       response.functionCalls = functionCalls;
-      if (process.env.DEBUG || process.env.DEBUG_MODE) {
-        console.error('[DEBUG] 累积处理后的最终functionCalls:', JSON.stringify(functionCalls, null, 2));
-      }
+      console.debug(`[DEBUG] 设置响应的functionCalls属性，包含 ${functionCalls.length} 个工具调用`);
     }
+    
+    console.debug(`[DEBUG] 最终生成的响应结构: ${JSON.stringify({
+      candidateCount: response.candidates?.length,
+      functionCallCount: response.functionCalls?.length,
+      partsCount: response.candidates?.[0]?.content?.parts?.length
+    })}`);
     
     return response as GenerateContentResponse;
   }

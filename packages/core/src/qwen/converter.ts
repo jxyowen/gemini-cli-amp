@@ -250,8 +250,8 @@ export function fromQwenGenerateResponse(qwenResponse: QwenGenerateResponse): Ge
   const choice = qwenResponse.choices?.[0];
   const text = choice?.message?.content || '';
   
-  // 添加调试日志：输出原始Qwen响应
-  console.debug('[DEBUG] Qwen原始响应:', JSON.stringify(qwenResponse, null, 2));
+  // 添加调试日志：输出原始Qwen响应（简化版本）
+  console.debug(`[DEBUG] Qwen非流式响应: choices=${qwenResponse.choices?.length}, hasToolCalls=${!!choice?.message?.tool_calls?.length}`);
   
   // 处理基本响应
   const parts: any[] = text ? [{ text }] : [];
@@ -259,28 +259,75 @@ export function fromQwenGenerateResponse(qwenResponse: QwenGenerateResponse): Ge
   
   // 处理tool_calls
   if (choice?.message?.tool_calls && choice.message.tool_calls.length > 0) {
-    console.debug('[DEBUG] 检测到tool_calls:', choice.message.tool_calls.length, '个');
+    console.debug(`[DEBUG] 检测到${choice.message.tool_calls.length}个tool_calls`);
     
     for (const toolCall of choice.message.tool_calls) {
-      console.debug('[DEBUG] 处理tool_call:', JSON.stringify(toolCall, null, 2));
+      console.debug(`[DEBUG] 处理tool_call: ${JSON.stringify({
+        id: toolCall.id,
+        name: toolCall.function.name,
+        argumentsLength: toolCall.function.arguments?.length || 0
+      })}`);
       
       let args = {};
+      
+      // 处理arguments（使用与流式版本相同的逻辑）
       if (toolCall.function.arguments) {
         try {
+          console.debug(`[DEBUG] 尝试解析arguments: ${toolCall.function.arguments.substring(0, 100)}${toolCall.function.arguments.length > 100 ? '...' : ''}`);
           args = JSON.parse(toolCall.function.arguments);
+          console.debug(`[DEBUG] 成功解析tool_call参数: ${JSON.stringify(args)}`);
         } catch (error) {
-          console.warn(`Failed to parse tool call arguments: ${toolCall.function.arguments}`, error);
-          args = {}; // 使用空对象作为fallback
+          console.error(`[ERROR] 解析tool call参数失败: ${toolCall.function.arguments}`, error);
+          
+          // 尝试修复常见的JSON格式问题（与流式版本相同的逻辑）
+          let fixedArgs = toolCall.function.arguments.trim();
+          
+          // 尝试移除可能的不完整结尾
+          if (fixedArgs.endsWith(',') || fixedArgs.endsWith('",')) {
+            fixedArgs = fixedArgs.replace(/,\s*$/, '');
+          }
+          
+          // 尝试补全不完整的JSON
+          if (fixedArgs.startsWith('{') && !fixedArgs.endsWith('}')) {
+            fixedArgs += '}';
+          }
+          if (fixedArgs.startsWith('[') && !fixedArgs.endsWith(']')) {
+            fixedArgs += ']';
+          }
+          
+          try {
+            args = JSON.parse(fixedArgs);
+            console.debug(`[DEBUG] 修复后成功解析参数: ${JSON.stringify(args)}`);
+          } catch (fixError) {
+            console.error(`[ERROR] 修复后仍无法解析参数: ${fixedArgs}`, fixError);
+            // 最后的fallback：将原始字符串作为单个参数
+            if (toolCall.function.arguments.trim()) {
+              args = { _raw_arguments: toolCall.function.arguments };
+            } else {
+              args = {};
+            }
+          }
         }
+      } else {
+        // 无参数的工具调用
+        console.debug(`[DEBUG] 无参数工具调用: ${toolCall.function.name}`);
+        args = {};
       }
       
+      // 确保有有效的function name
+      const functionName = toolCall.function.name || 'unknown_function';
+      
       const functionCall = {
-        id: toolCall.id || `${toolCall.function.name}-${Date.now()}`,
-        name: toolCall.function.name,
+        id: toolCall.id || `${functionName}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        name: functionName,
         args,
       };
       
-      console.debug('[DEBUG] 生成的functionCall:', JSON.stringify(functionCall, null, 2));
+      console.debug(`[DEBUG] 生成的functionCall: ${JSON.stringify({
+        id: functionCall.id,
+        name: functionCall.name,
+        argsKeys: Object.keys(functionCall.args)
+      })}`);
       
       // 添加到parts数组中（用于GenerateContentResponse的标准格式）
       parts.push({ functionCall });
@@ -299,23 +346,28 @@ export function fromQwenGenerateResponse(qwenResponse: QwenGenerateResponse): Ge
     index: 0,
   };
 
-  // 使用对象字面量创建响应，这样可以设置functionCalls属性
+  // 构建响应对象
   const response: any = {
     candidates: [candidate],
     usageMetadata: {
-      promptTokenCount: qwenResponse.usage.prompt_tokens,
-      candidatesTokenCount: qwenResponse.usage.completion_tokens,
-      totalTokenCount: qwenResponse.usage.total_tokens,
+      promptTokenCount: qwenResponse.usage?.prompt_tokens || 0,
+      candidatesTokenCount: qwenResponse.usage?.completion_tokens || 0,
+      totalTokenCount: qwenResponse.usage?.total_tokens || 0,
     },
   };
   
-  // 如果有function calls，设置functionCalls属性
+  // 设置functionCalls属性（这是关键！）
   if (functionCalls.length > 0) {
     response.functionCalls = functionCalls;
-    console.debug('[DEBUG] 最终响应中的functionCalls:', JSON.stringify(functionCalls, null, 2));
+    console.debug(`[DEBUG] 设置非流式响应的functionCalls属性，包含 ${functionCalls.length} 个工具调用`);
   }
   
-  console.debug('[DEBUG] 转换后的完整响应:', JSON.stringify(response, null, 2));
+  console.debug(`[DEBUG] 非流式转换后的响应结构: ${JSON.stringify({
+    candidateCount: response.candidates?.length,
+    functionCallCount: response.functionCalls?.length,
+    partsCount: response.candidates?.[0]?.content?.parts?.length,
+    usageTotal: response.usageMetadata?.totalTokenCount
+  })}`);
   
   return response as GenerateContentResponse;
 }

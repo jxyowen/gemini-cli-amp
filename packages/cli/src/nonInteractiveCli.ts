@@ -60,13 +60,25 @@ export async function runNonInteractive(
   const geminiClient = config.getGeminiClient();
   const toolRegistry: ToolRegistry = await config.getToolRegistry();
 
+  // 添加调试信息：显示可用工具
+  const availableTools = toolRegistry.getFunctionDeclarations();
+  console.debug(`[DEBUG] 初始化完成，可用工具数量: ${availableTools.length}`);
+  console.debug(`[DEBUG] 可用工具列表: ${availableTools.map((tool) => tool.name).join(', ')}`);
+
   const chat = await geminiClient.getChat();
   const abortController = new AbortController();
   let currentMessages: Content[] = [{ role: 'user', parts: [{ text: input }] }];
+  let iterationCount = 0;
 
   try {
     while (true) {
+      iterationCount++;
+      console.debug(`[DEBUG] 开始第 ${iterationCount} 轮对话`);
+      
       const functionCalls: FunctionCall[] = [];
+
+      console.debug(`[DEBUG] 发送消息到模型，当前消息数: ${currentMessages.length}`);
+      console.debug(`[DEBUG] 当前消息角色: ${currentMessages.map((msg) => msg.role).join(', ')}`);
 
       const responseStream = await chat.sendMessageStream(
         {
@@ -81,33 +93,50 @@ export async function runNonInteractive(
         prompt_id,
       );
 
+      console.debug(`[DEBUG] 开始处理流式响应`);
+      let responseCount = 0;
+
       for await (const resp of responseStream) {
+        responseCount++;
+        
         if (abortController.signal.aborted) {
           console.error('Operation cancelled.');
           return;
         }
         
-        // 添加调试日志：输出每个响应
-        console.debug(`[DEBUG] 收到响应: ${JSON.stringify(resp, null, 2)}`);
+        // 简化的调试日志：只在有重要信息时输出
+        const hasText = !!getResponseText(resp);
+        const hasFunctionCalls = !!resp.functionCalls;
+        const hasFinishReason = !!resp.candidates?.[0]?.finishReason;
+        
+        if (hasText || hasFunctionCalls || hasFinishReason) {
+          console.debug(`[DEBUG] 响应 #${responseCount}: 文本=${hasText}, 工具调用=${hasFunctionCalls}, 结束原因=${hasFinishReason}`);
+        }
         
         const textPart = getResponseText(resp);
         if (textPart) {
           process.stdout.write(textPart);
         }
+        
         if (resp.functionCalls) {
-          console.debug(`[DEBUG] 响应中包含functionCalls: ${resp.functionCalls.length} 个`);
-          console.debug(`[DEBUG] functionCalls详情: ${JSON.stringify(resp.functionCalls, null, 2)}`);
+          console.debug(`[DEBUG] 检测到工具调用: ${resp.functionCalls.length} 个`);
+          for (const fc of resp.functionCalls) {
+            console.debug(`[DEBUG] 工具调用详情: 名称=${fc.name}, ID=${fc.id}, 参数键=[${Object.keys(fc.args || {}).join(', ')}]`);
+          }
           functionCalls.push(...resp.functionCalls);
         }
       }
 
+      console.debug(`[DEBUG] 流式响应处理完毕，总计收到 ${responseCount} 个响应片段`);
+
       if (functionCalls.length > 0) {
-        console.debug(`[DEBUG] 总共收到 ${functionCalls.length} 个工具调用`);
+        console.debug(`[DEBUG] 累计收到 ${functionCalls.length} 个工具调用，开始执行`);
         
         const toolResponseParts: Part[] = [];
 
-        for (const fc of functionCalls) {
-          console.debug(`[DEBUG] 处理工具调用: ${JSON.stringify(fc, null, 2)}`);
+        for (let i = 0; i < functionCalls.length; i++) {
+          const fc = functionCalls[i];
+          console.debug(`[DEBUG] 执行工具调用 ${i + 1}/${functionCalls.length}: ${fc.name}`);
           
           const callId = fc.id ?? `${fc.name}-${Date.now()}`;
           const requestInfo: ToolCallRequestInfo = {
@@ -118,21 +147,16 @@ export async function runNonInteractive(
             prompt_id,
           };
 
-          console.debug(`[DEBUG] 工具调用请求信息: ${JSON.stringify(requestInfo, null, 2)}`);
-
+          const startTime = Date.now();
           const toolResponse = await executeToolCall(
             config,
             requestInfo,
             toolRegistry,
             abortController.signal,
           );
+          const duration = Date.now() - startTime;
 
-          console.debug(`[DEBUG] 工具执行结果: ${JSON.stringify({
-            callId: toolResponse.callId,
-            error: toolResponse.error?.message,
-            hasResponseParts: !!toolResponse.responseParts,
-            resultDisplay: toolResponse.resultDisplay
-          }, null, 2)}`);
+          console.debug(`[DEBUG] 工具 ${fc.name} 执行完成 (${duration}ms): 成功=${!toolResponse.error}, 有响应=${!!toolResponse.responseParts}`);
 
           if (toolResponse.error) {
             const isToolNotFound = toolResponse.error.message.includes(
@@ -159,8 +183,11 @@ export async function runNonInteractive(
             }
           }
         }
+        
+        console.debug(`[DEBUG] 所有工具调用执行完毕，生成 ${toolResponseParts.length} 个响应部分`);
         currentMessages = [{ role: 'user', parts: toolResponseParts }];
       } else {
+        console.debug(`[DEBUG] 没有工具调用，对话结束`);
         process.stdout.write('\n'); // Ensure a final newline
         return;
       }
