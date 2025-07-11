@@ -221,20 +221,9 @@ export function toQwenGenerateRequest(
       request.stop = params.config.stopSequences;
     }
     
-    // 重要修复：对于 Qwen 模型，在非流式调用中不应该传递 enable_thinking 参数
-    // 根据阿里云文档，enable_thinking 在非流式调用中必须为 false
-    // 为了避免 API 错误，我们完全不传递这个参数给非流式调用
-    if (!stream) {
-      // 非流式调用：不传递 enable_thinking 参数
-      // 这样可以避免 "parameter.enable_thinking must be set to false for non-streaming calls" 错误
-    } else {
-      // 流式调用：可以传递 enable_thinking 参数
-      // 检查是否有 thinkingConfig 配置
-      if (params.config && 'thinkingConfig' in params.config) {
-        // 如果有 thinkingConfig，则启用 thinking 模式
-        request.enable_thinking = true;
-      }
-    }
+    // 始终显式设置 enable_thinking 为 false
+    // 根据用户要求，所有 Qwen API 调用都应该禁用 thinking 模式
+    request.enable_thinking = false;
   }
 
   // 转换工具定义

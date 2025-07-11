@@ -373,9 +373,11 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
       let apiSchema = '';
       try {
         apiSchema = fs.readFileSync(schemaPath, 'utf8');
+        if (!apiSchema || apiSchema.trim() === '') {
+          throw new Error('API Schema文件为空');
+        }
       } catch (error) {
-        console.warn('无法读取apiJsonSchema.yml文件，将继续使用基本的修改逻辑');
-        apiSchema = '# API Schema not available';
+        throw new Error(`无法读取或解析API Schema文件: ${getErrorMessage(error)}`);
       }
       
       // 3. 构建提示词
