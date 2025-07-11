@@ -5,9 +5,6 @@
  */
 
 import * as Diff from 'diff';
-import * as fs from 'fs';
-import * as path from 'path';
-import { fileURLToPath } from 'url';
 import { SchemaValidator } from '../utils/schemaValidator.js';
 import {
   BaseTool,
@@ -22,6 +19,7 @@ import { fetchWithTimeout } from '../utils/fetch.js';
 import { DEFAULT_DIFF_OPTIONS } from './diffOptions.js';
 import { getResponseText } from '../utils/generateContentResponseUtilities.js';
 import { Type } from '@google/genai';
+import { apiJsonSchema } from '../core/apiJsonSchema.js';
 
 const API_TIMEOUT_MS = 10000;
 const API_BASE_URL = 'https://pre-cs.api.aliyun-inc.com';
@@ -362,30 +360,19 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
   }
 
   private async editApi(apiName: string, changeDescription: string, signal: AbortSignal): Promise<any> {
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const schemaPath = path.join(__dirname, '../core/apiJsonSchema.yml');
     try {
       // 1. 获取当前API定义
       const currentApiData = await this.getApi(apiName, signal);
       
-      // 2. 读取API JSON Schema
-      let apiSchema = '';
-      try {
-        apiSchema = fs.readFileSync(schemaPath, 'utf8');
-        if (!apiSchema || apiSchema.trim() === '') {
-          throw new Error('API Schema文件为空');
-        }
-      } catch (error) {
-        throw new Error(`无法读取或解析API Schema文件: ${getErrorMessage(error)}`);
-      }
+      // 2. 获取API JSON Schema（直接从导入的对象中获取）
+      const apiSchemaJson = JSON.stringify(apiJsonSchema, null, 2);
       
       // 3. 构建提示词
       const prompt = `你是一个阿里云API设计专家。请根据以下API JSON Schema规范和用户的修改要求，修改给定的API定义。
 
 API JSON Schema规范：
-\`\`\`yaml
-${apiSchema}
+\`\`\`json
+${apiSchemaJson}
 \`\`\`
 
 当前API定义：
