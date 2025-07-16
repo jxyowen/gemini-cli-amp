@@ -198,23 +198,6 @@ export const useSlashCommandProcessor = (
     load();
   }, [commandService]);
 
-  const savedChatTags = useCallback(async () => {
-    const geminiDir = config?.getProjectTempDir();
-    if (!geminiDir) {
-      return [];
-    }
-    try {
-      const files = await fs.readdir(geminiDir);
-      return files
-        .filter(
-          (file) => file.startsWith('checkpoint-') && file.endsWith('.json'),
-        )
-        .map((file) => file.replace('checkpoint-', '').replace('.json', ''));
-    } catch (_err) {
-      return [];
-    }
-  }, [config]);
-
   // Define legacy commands
   // This list contains all commands that have NOT YET been migrated to the
   // new system. As commands are migrated, they are removed from this list.
@@ -243,56 +226,9 @@ export const useSlashCommandProcessor = (
         },
       },
       {
-        name: 'theme',
-        description: 'change the theme',
-        action: (_mainCommand, _subCommand, _args) => {
-          openThemeDialog();
-        },
-      },
-      {
-        name: 'auth',
-        description: 'change the auth method',
-        action: (_mainCommand, _subCommand, _args) => openAuthDialog(),
-      },
-      {
         name: 'editor',
         description: 'set external editor preference',
         action: (_mainCommand, _subCommand, _args) => openEditorDialog(),
-      },
-      {
-        name: 'privacy',
-        description: 'display the privacy notice',
-        action: (_mainCommand, _subCommand, _args) => openPrivacyNotice(),
-      },
-      {
-        name: 'stats',
-        altName: 'usage',
-        description: 'check session stats. Usage: /stats [model|tools]',
-        action: (_mainCommand, subCommand, _args) => {
-          if (subCommand === 'model') {
-            addMessage({
-              type: MessageType.MODEL_STATS,
-              timestamp: new Date(),
-            });
-            return;
-          } else if (subCommand === 'tools') {
-            addMessage({
-              type: MessageType.TOOL_STATS,
-              timestamp: new Date(),
-            });
-            return;
-          }
-
-          const now = new Date();
-          const { sessionStartTime } = session.stats;
-          const wallDuration = now.getTime() - sessionStartTime.getTime();
-
-          addMessage({
-            type: MessageType.STATS,
-            duration: formatDuration(wallDuration),
-            timestamp: new Date(),
-          });
-        },
       },
       {
         name: 'mcp',
@@ -574,35 +510,6 @@ export const useSlashCommandProcessor = (
         },
       },
       {
-        name: 'about',
-        description: 'show version info',
-        action: async (_mainCommand, _subCommand, _args) => {
-          const osVersion = process.platform;
-          let sandboxEnv = 'no sandbox';
-          if (process.env.SANDBOX && process.env.SANDBOX !== 'sandbox-exec') {
-            sandboxEnv = process.env.SANDBOX;
-          } else if (process.env.SANDBOX === 'sandbox-exec') {
-            sandboxEnv = `sandbox-exec (${
-              process.env.SEATBELT_PROFILE || 'unknown'
-            })`;
-          }
-          const modelVersion = config?.getModel() || 'Unknown';
-          const cliVersion = await getCliVersion();
-          const selectedAuthType = settings.merged.selectedAuthType || '';
-          const gcpProject = process.env.GOOGLE_CLOUD_PROJECT || '';
-          addMessage({
-            type: MessageType.ABOUT,
-            timestamp: new Date(),
-            cliVersion,
-            osVersion,
-            sandboxEnv,
-            modelVersion,
-            selectedAuthType,
-            gcpProject,
-          });
-        },
-      },
-      {
         name: 'bug',
         description: 'submit a bug report',
         action: async (_mainCommand, _subCommand, args) => {
@@ -664,142 +571,7 @@ export const useSlashCommandProcessor = (
           })();
         },
       },
-      {
-        name: 'chat',
-        description:
-          'Manage conversation history. Usage: /chat <list|save|resume> <tag>',
-        action: async (_mainCommand, subCommand, args) => {
-          const tag = (args || '').trim();
-          const logger = new Logger(config?.getSessionId() || '');
-          await logger.initialize();
-          const chat = await config?.getGeminiClient()?.getChat();
-          if (!chat) {
-            addMessage({
-              type: MessageType.ERROR,
-              content: 'No chat client available for conversation status.',
-              timestamp: new Date(),
-            });
-            return;
-          }
-          if (!subCommand) {
-            addMessage({
-              type: MessageType.ERROR,
-              content: 'Missing command\nUsage: /chat <list|save|resume> <tag>',
-              timestamp: new Date(),
-            });
-            return;
-          }
-          switch (subCommand) {
-            case 'save': {
-              if (!tag) {
-                addMessage({
-                  type: MessageType.ERROR,
-                  content: 'Missing tag. Usage: /chat save <tag>',
-                  timestamp: new Date(),
-                });
-                return;
-              }
-              const history = chat.getHistory();
-              if (history.length > 0) {
-                await logger.saveCheckpoint(chat?.getHistory() || [], tag);
-                addMessage({
-                  type: MessageType.INFO,
-                  content: `Conversation checkpoint saved with tag: ${tag}.`,
-                  timestamp: new Date(),
-                });
-              } else {
-                addMessage({
-                  type: MessageType.INFO,
-                  content: 'No conversation found to save.',
-                  timestamp: new Date(),
-                });
-              }
-              return;
-            }
-            case 'resume':
-            case 'restore':
-            case 'load': {
-              if (!tag) {
-                addMessage({
-                  type: MessageType.ERROR,
-                  content: 'Missing tag. Usage: /chat resume <tag>',
-                  timestamp: new Date(),
-                });
-                return;
-              }
-              const conversation = await logger.loadCheckpoint(tag);
-              if (conversation.length === 0) {
-                addMessage({
-                  type: MessageType.INFO,
-                  content: `No saved checkpoint found with tag: ${tag}.`,
-                  timestamp: new Date(),
-                });
-                return;
-              }
 
-              clearItems();
-              chat.clearHistory();
-              const rolemap: { [key: string]: MessageType } = {
-                user: MessageType.USER,
-                model: MessageType.GEMINI,
-              };
-              let hasSystemPrompt = false;
-              let i = 0;
-              for (const item of conversation) {
-                i += 1;
-
-                // Add each item to history regardless of whether we display
-                // it.
-                chat.addHistory(item);
-
-                const text =
-                  item.parts
-                    ?.filter((m) => !!m.text)
-                    .map((m) => m.text)
-                    .join('') || '';
-                if (!text) {
-                  // Parsing Part[] back to various non-text output not yet implemented.
-                  continue;
-                }
-                if (i === 1 && text.match(/context for our chat/)) {
-                  hasSystemPrompt = true;
-                }
-                if (i > 2 || !hasSystemPrompt) {
-                  addItem(
-                    {
-                      type:
-                        (item.role && rolemap[item.role]) || MessageType.GEMINI,
-                      text,
-                    } as HistoryItemWithoutId,
-                    i,
-                  );
-                }
-              }
-              console.clear();
-              refreshStatic();
-              return;
-            }
-            case 'list':
-              addMessage({
-                type: MessageType.INFO,
-                content:
-                  'list of saved conversations: ' +
-                  (await savedChatTags()).join(', '),
-                timestamp: new Date(),
-              });
-              return;
-            default:
-              addMessage({
-                type: MessageType.ERROR,
-                content: `Unknown /chat command: ${subCommand}. Available: list, save, resume`,
-                timestamp: new Date(),
-              });
-              return;
-          }
-        },
-        completion: async () =>
-          (await savedChatTags()).map((tag) => 'resume ' + tag),
-      },
       {
         name: 'quit',
         altName: 'exit',
@@ -852,7 +624,8 @@ export const useSlashCommandProcessor = (
           try {
             const compressed = await config!
               .getGeminiClient()!
-              .tryCompressChat(true);
+              // TODO: Set Prompt id for CompressChat from SlashCommandProcessor.
+              .tryCompressChat('Prompt Id not set', true);
             if (compressed) {
               addMessage({
                 type: MessageType.COMPRESSION,
@@ -1005,24 +778,16 @@ export const useSlashCommandProcessor = (
     return commands;
   }, [
     addMessage,
-    openThemeDialog,
-    openAuthDialog,
     openEditorDialog,
-    openPrivacyNotice,
     toggleCorgiMode,
-    savedChatTags,
     config,
-    settings,
     showToolDescriptions,
     session,
     gitService,
     loadHistory,
-    addItem,
     setQuittingMessages,
     pendingCompressionItemRef,
     setPendingCompressionItem,
-    clearItems,
-    refreshStatic,
   ]);
 
   const handleSlashCommand = useCallback(
@@ -1104,6 +869,15 @@ export const useSlashCommandProcessor = (
                   case 'help':
                     setShowHelp(true);
                     return { type: 'handled' };
+                  case 'auth':
+                    openAuthDialog();
+                    return { type: 'handled' };
+                  case 'theme':
+                    openThemeDialog();
+                    return { type: 'handled' };
+                  case 'privacy':
+                    openPrivacyNotice();
+                    return { type: 'handled' };
                   default: {
                     const unhandled: never = result.dialog;
                     throw new Error(
@@ -1111,6 +885,16 @@ export const useSlashCommandProcessor = (
                     );
                   }
                 }
+              case 'load_history': {
+                await config
+                  ?.getGeminiClient()
+                  ?.setHistory(result.clientHistory);
+                commandContext.ui.clear();
+                result.history.forEach((item, index) => {
+                  commandContext.ui.addItem(item, index);
+                });
+                return { type: 'handled' };
+              }
               default: {
                 const unhandled: never = result;
                 throw new Error(`Unhandled slash command result: ${unhandled}`);
@@ -1179,12 +963,16 @@ export const useSlashCommandProcessor = (
       return { type: 'handled' };
     },
     [
+      config,
       addItem,
       setShowHelp,
+      openAuthDialog,
       commands,
       legacyCommands,
       commandContext,
       addMessage,
+      openThemeDialog,
+      openPrivacyNotice,
     ],
   );
 
