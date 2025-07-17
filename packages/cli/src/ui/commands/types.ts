@@ -9,6 +9,7 @@ import { HistoryItemWithoutId } from '../types.js';
 import { Config, GitService, Logger } from '@google/gemini-cli-core';
 import { LoadedSettings } from '../../config/settings.js';
 import { UseHistoryManagerReturn } from '../hooks/useHistoryManager.js';
+import type { HistoryItem } from '../types.js';
 import { SessionStatsState } from '../contexts/SessionContext.js';
 
 // Grouped dependencies for clarity and easier mocking
@@ -23,11 +24,6 @@ export interface CommandContext {
   };
   // UI state and history management
   ui: {
-    // TODO - As more commands are add some additions may be needed or reworked using this new context.
-    // Ex.
-    // history: HistoryItem[];
-    // pendingHistoryItems: HistoryItemWithoutId[];
-
     /** Adds a new item to the history display. */
     addItem: UseHistoryManagerReturn['addItem'];
     /** Clears all history items and the console screen. */
@@ -36,6 +32,15 @@ export interface CommandContext {
      * Sets the transient debug message displayed in the application footer in debug mode.
      */
     setDebugMessage: (message: string) => void;
+    /** The currently pending history item, if any. */
+    pendingItem: HistoryItemWithoutId | null;
+    /**
+     * Sets a pending item in the history, which is useful for indicating
+     * that a long-running operation is in progress.
+     *
+     * @param item The history item to display as pending, or `null` to clear.
+     */
+    setPendingItem: (item: HistoryItemWithoutId | null) => void;
   };
   // Session-specific data
   session: {
@@ -50,6 +55,12 @@ export interface ToolActionReturn {
   type: 'tool';
   toolName: string;
   toolArgs: Record<string, unknown>;
+}
+
+/** The return type for a command action that results in the app quitting. */
+export interface QuitActionReturn {
+  type: 'quit';
+  messages: HistoryItem[];
 }
 
 /**
@@ -67,8 +78,7 @@ export interface MessageActionReturn {
  */
 export interface OpenDialogActionReturn {
   type: 'dialog';
-  // TODO: Add 'theme' | 'auth' | 'editor' | 'privacy' as migration happens.
-  dialog: 'help' | 'auth' | 'theme' | 'privacy';
+  dialog: 'help' | 'auth' | 'theme' | 'editor' | 'privacy';
 }
 
 /**
@@ -84,6 +94,7 @@ export interface LoadHistoryActionReturn {
 export type SlashCommandActionReturn =
   | ToolActionReturn
   | MessageActionReturn
+  | QuitActionReturn
   | OpenDialogActionReturn
   | LoadHistoryActionReturn;
 // The standardized contract for any command in the system.
