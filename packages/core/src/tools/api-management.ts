@@ -15,6 +15,7 @@ import {
   ToolCallConfirmationDetails,
   ToolConfirmationOutcome,
   FileDiff,
+  Icon,
 } from './tools.js';
 import { getErrorMessage } from '../utils/errors.js';
 import { Config, ApprovalMode } from '../config/config.js';
@@ -48,6 +49,7 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
       ApiManagementTool.Name,
       '镇元(阿里云) API 管理',
       '本工具专用于管理镇元API、阿里云API等接口的全生命周期，包括API获取、修改、发布、列表查询等。',
+      Icon.Globe,
       {
         properties: {
           action: {
