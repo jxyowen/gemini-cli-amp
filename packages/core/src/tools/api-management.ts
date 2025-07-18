@@ -9,6 +9,13 @@ import { fileURLToPath } from 'url';
 import { SchemaValidator } from '../utils/schemaValidator.js';
 import { apiJsonSchema } from '../core/apiJsonSchema.js';
 import {
+  listApisData,
+  updateApiData,
+  publishApiData,
+  debugApiData,
+  getApiData,
+} from '../core/ampApiMockData.js';
+import {
   BaseTool,
   ToolResult,
   ToolCallConfirmationDetails,
@@ -301,6 +308,11 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
   }
 
   private async getApi(apiName: string, signal: AbortSignal): Promise<any> {
+    if (this.isMockingEnabled()) {
+      // 返回mock数据
+      return getApiData.data;
+    }
+
     const url = `${API_BASE_URL}/api/v2/idea_plugin/apis/${apiName}`;
     
     const response = await this.fetchWithTimeoutAndOptions(
@@ -320,6 +332,11 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
   }
 
   private async listApiNames(signal: AbortSignal): Promise<string[]> {
+    if (this.isMockingEnabled()) {
+      // 返回mock数据
+      return listApisData.data;
+    }
+
     const url = `${API_BASE_URL}/api/v2/idea_plugin/apis`;
     
     const response = await this.fetchWithTimeoutAndOptions(
@@ -375,8 +392,24 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
 
   private async editApi(apiName: string, changeDescription: string, signal: AbortSignal): Promise<any> {
     try {
-      // 1. 获取当前API定义
+      // 1. 获取当前API定义（如果启用mock，会自动返回mock数据）
       const currentApiData = await this.getApi(apiName, signal);
+      
+      if (this.isMockingEnabled()) {
+        // 在mock模式下，创建一个简单的编辑结果，模拟API修改
+        const modifiedApiData = JSON.parse(JSON.stringify(currentApiData)); // 深拷贝
+        
+        // 模拟一个简单的修改：更新summary字段
+        if (modifiedApiData.apis && modifiedApiData.apis.HasUserRolesCheckV2) {
+          modifiedApiData.apis.HasUserRolesCheckV2.summary = 
+            modifiedApiData.apis.HasUserRolesCheckV2.summary + ' (已修改: ' + changeDescription + ')';
+        }
+        
+        return {
+          before: currentApiData,
+          after: modifiedApiData
+        };
+      }
       
       // 2. 获取API JSON Schema
       const apiSchema = JSON.stringify(apiJsonSchema, null, 2);
@@ -448,6 +481,11 @@ ${changeDescription}
   }
 
   private async publishApi(apiName: string, signal: AbortSignal): Promise<any> {
+    if (this.isMockingEnabled()) {
+      // 返回mock数据
+      return publishApiData.data;
+    }
+
     const env = this.getEnvironment();
     const url = `${API_BASE_URL}/api/v2/idea_plugin/apis/${apiName}/publish`;
     const params = new URLSearchParams();
@@ -475,6 +513,11 @@ ${changeDescription}
   }
 
   private async updateApi(apiName: string, updatedApiJson: string, signal: AbortSignal): Promise<any> {
+    if (this.isMockingEnabled()) {
+      // 返回mock数据
+      return updateApiData.data;
+    }
+
     const url = `${API_BASE_URL}/api/v2/idea_plugin/apis/${apiName}`;
     
     const response = await this.fetchWithTimeoutAndOptions(
@@ -498,6 +541,11 @@ ${changeDescription}
   }
 
   private async debugApi(apiName: string, signal: AbortSignal): Promise<any> {
+    if (this.isMockingEnabled()) {
+      // 返回mock数据
+      return debugApiData.data;
+    }
+
     const env = this.getEnvironment();
     const url = `${API_BASE_URL}/api/v2/idea_plugin/apis/${apiName}/debug`;
     const params = new URLSearchParams();
@@ -527,6 +575,10 @@ ${changeDescription}
   private getEnvironment(): string {
     // 从环境变量获取环境设置，默认为daily
     return process.env.AMP_CLI_ENV || 'daily';
+  }
+
+  private isMockingEnabled(): boolean {
+    return process.env.AMP_API_MOCK === 'true';
   }
 
   private async throwDetailedApiError(response: Response, operation: string): Promise<never> {
