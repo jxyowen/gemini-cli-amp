@@ -571,6 +571,58 @@ describe('ApiManagementTool publish and debug functionality', () => {
     });
   });
 
+  describe('URL parameter handling', () => {
+    it('should not duplicate projectUuid parameter in URL', async () => {
+      const mockResponseData = { data: { status: 'success' } };
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue(mockResponseData),
+      } as any);
+
+      await tool.execute({
+        action: 'publish',
+        apiName: 'TestApi'
+      }, new AbortController().signal);
+
+      const fetchCall = (global.fetch as any).mock.calls[0];
+      const url = fetchCall[0];
+      
+      // 验证projectUuid只出现一次，不会重复
+      const matches = url.match(/projectUuid=/g);
+      expect(matches).toHaveLength(1);
+      
+      // 验证最终URL包含正确的参数
+      expect(url).toContain('projectUuid=test-project-uuid');
+      expect(url).toContain('env=test');
+      expect(url).not.toContain('test-project-uuid,test-project-uuid');
+    });
+
+    it('should not duplicate projectUuid parameter in debug API URL', async () => {
+      const mockResponseData = { data: { status: 'success' } };
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue(mockResponseData),
+      } as any);
+
+      await tool.execute({
+        action: 'debug',
+        apiName: 'TestApi'
+      }, new AbortController().signal);
+
+      const fetchCall = (global.fetch as any).mock.calls[0];
+      const url = fetchCall[0];
+      
+      // 验证projectUuid只出现一次，不会重复
+      const matches = url.match(/projectUuid=/g);
+      expect(matches).toHaveLength(1);
+      
+      // 验证最终URL包含正确的参数
+      expect(url).toContain('projectUuid=test-project-uuid');
+      expect(url).toContain('env=test');
+      expect(url).not.toContain('test-project-uuid,test-project-uuid');
+    });
+  });
+
   describe('detailed error handling', () => {
     it('should handle non-JSON error response', async () => {
       const plainTextError = 'Internal server error occurred while processing your request';

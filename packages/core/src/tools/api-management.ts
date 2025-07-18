@@ -461,12 +461,6 @@ ${changeDescription}
     const url = `${API_BASE_URL}/api/v2/idea_plugin/apis/${apiName}/publish`;
     const params = new URLSearchParams();
     
-    // 添加环境变量中的projectUuid（如果存在）
-    const projectUuid = process.env.AMP_CLI_PROJECT;
-    if (projectUuid) {
-      params.append('projectUuid', projectUuid);
-    }
-    
     // 添加环境参数
     params.append('env', env);
     
@@ -516,12 +510,6 @@ ${changeDescription}
     const env = this.getEnvironment();
     const url = `${API_BASE_URL}/api/v2/idea_plugin/apis/${apiName}/debug`;
     const params = new URLSearchParams();
-    
-    // 添加环境变量中的projectUuid（如果存在）
-    const projectUuid = process.env.AMP_CLI_PROJECT;
-    if (projectUuid) {
-      params.append('projectUuid', projectUuid);
-    }
     
     // 添加环境参数
     params.append('env', env);
