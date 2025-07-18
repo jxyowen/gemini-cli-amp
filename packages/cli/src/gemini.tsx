@@ -25,7 +25,7 @@ import { getStartupWarnings } from './utils/startupWarnings.js';
 import { getUserStartupWarnings } from './utils/userStartupWarnings.js';
 import { runNonInteractive } from './nonInteractiveCli.js';
 import { loadExtensions, Extension } from './config/extension.js';
-import { cleanupCheckpoints } from './utils/cleanup.js';
+import { cleanupCheckpoints, registerCleanup } from './utils/cleanup.js';
 import { getCliVersion } from './utils/version.js';
 import {
   ApprovalMode,
@@ -84,6 +84,7 @@ async function relaunchWithAdditionalArgs(additionalArgs: string[]) {
   await new Promise((resolve) => child.on('close', resolve));
   process.exit(0);
 }
+import { runAcpPeer } from './acp/acpPeer.js';
 
 export async function main() {
   const workspaceRoot = process.cwd();
@@ -189,6 +190,10 @@ export async function main() {
     await getOauthClient(settings.merged.selectedAuthType, config);
   }
 
+  if (config.getExperimentalAcp()) {
+    return runAcpPeer(config, settings);
+  }
+
   let input = config.getQuestion();
   const startupWarnings = [
     ...(await getStartupWarnings()),
@@ -202,7 +207,7 @@ export async function main() {
   if (shouldBeInteractive) {
     const version = await getCliVersion();
     setWindowTitle(basename(workspaceRoot), settings);
-    render(
+    const instance = render(
       <React.StrictMode>
         <AppWrapper
           config={config}
@@ -213,6 +218,8 @@ export async function main() {
       </React.StrictMode>,
       { exitOnCtrlC: false },
     );
+
+    registerCleanup(() => instance.unmount());
     return;
   }
   // If not a TTY, read from stdin

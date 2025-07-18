@@ -15,6 +15,7 @@ import {
   ToolCallConfirmationDetails,
   ToolConfirmationOutcome,
   FileDiff,
+  Icon,
 } from './tools.js';
 import { getErrorMessage } from '../utils/errors.js';
 import { Config, ApprovalMode } from '../config/config.js';
@@ -30,7 +31,7 @@ const API_BASE_URL = 'https://pre-cs.api.aliyun-inc.com';
  * 通用API管理工具参数
  */
 export interface ApiManagementToolParams {
-  action: 'get' | 'edit' | 'publish' | 'list';
+  action: 'get' | 'edit' | 'publish' | 'debug' | 'list';
   apiName?: string;
   changeDescription?: string;
 }
@@ -47,13 +48,14 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
     super(
       ApiManagementTool.Name,
       '镇元(阿里云) API 管理',
-      '本工具专用于管理镇元API、阿里云API等接口的全生命周期，包括API获取、修改、发布、列表查询等。',
+      '本工具专用于管理镇元API、阿里云API等接口的全生命周期，包括API获取、修改、发布、调试、列表查询等。',
+      Icon.Globe,
       {
         properties: {
           action: {
-            description: '要执行的操作类型：get（获取API）、edit（修改API定义和参数）、publish（发布API）、list（获取API名称列表）',
+            description: '要执行的操作类型：get（获取API）、edit（修改API定义和参数）、publish（发布API）、debug（调试API）、list（获取API名称列表）',
             type: Type.STRING,
-            enum: ['get', 'edit', 'publish', 'list'],
+            enum: ['get', 'edit', 'publish', 'debug', 'list'],
           },
           apiName: {
             description: '需要管理的API名称（如：CreateInstance、ListUsers 等），list操作时可选',
@@ -96,6 +98,8 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
         return `修改API定义: ${params.apiName} - ${params.changeDescription}`;
       case 'publish':
         return `发布API到网关: ${params.apiName}`;
+      case 'debug':
+        return `调试API: ${params.apiName}`;
       case 'list':
         return `获取API名称列表`;
       default:
@@ -116,8 +120,8 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
       return false;
     }
 
-    // 只有get和list操作不需要人工确认，edit和publish都需要确认
-    if (params.action === 'get' || params.action === 'list') {
+    // 只有get、list和debug操作不需要人工确认，edit和publish需要确认
+    if (params.action === 'get' || params.action === 'list' || params.action === 'debug') {
       return false;
     }
 
@@ -177,7 +181,8 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
     }
 
     const actionDescriptions = {
-      publish: '发布API到网关'
+      publish: '发布API到网关',
+      debug: '调试API'
     };
 
     return {
@@ -266,6 +271,14 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
           displayMessage = `成功发布API到网关: ${params.apiName}`;
           displayResult = `${displayMessage}\n\n${JSON.stringify(result, null, 2)}`;
           break;
+        case 'debug':
+          if (!params.apiName) {
+            throw new Error('apiName参数是必需的');
+          }
+          result = await this.debugApi(params.apiName, signal);
+          displayMessage = `成功调试API: ${params.apiName}`;
+          displayResult = `${displayMessage}\n\n${JSON.stringify(result, null, 2)}`;
+          break;
         case 'list':
           result = await this.listApiNames(signal);
           displayMessage = `成功获取API名称列表`;
@@ -300,7 +313,7 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
     );
 
     if (!response.ok) {
-      throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
+      await this.throwDetailedApiError(response, 'getApi');
     }
 
     const responseData = await response.json();
@@ -319,7 +332,7 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
     );
 
     if (!response.ok) {
-      throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
+      await this.throwDetailedApiError(response, 'listApiNames');
     }
 
     const responseData = await response.json();
@@ -362,9 +375,8 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
   }
 
   private async editApi(apiName: string, changeDescription: string, signal: AbortSignal): Promise<any> {
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const schemaPath = path.join(__dirname, '../core/apiJsonSchema.yml');
+    // 使用相对路径来获取schema文件（相对于项目根目录）
+    const schemaPath = path.resolve('packages/core/src/core/apiJsonSchema.yml');
     try {
       // 1. 获取当前API定义
       const currentApiData = await this.getApi(apiName, signal);
@@ -445,8 +457,12 @@ ${changeDescription}
   }
 
   private async publishApi(apiName: string, signal: AbortSignal): Promise<any> {
-    const url = `${API_BASE_URL}/test/publish_api`;
-    const params = new URLSearchParams({ apiName });
+    const env = this.getEnvironment();
+    const url = `${API_BASE_URL}/api/v2/idea_plugin/apis/${apiName}/publish`;
+    const params = new URLSearchParams();
+    
+    // 添加环境参数
+    params.append('env', env);
     
     const response = await this.fetchWithTimeoutAndOptions(
       `${url}?${params.toString()}`,
@@ -460,7 +476,7 @@ ${changeDescription}
     );
 
     if (!response.ok) {
-      throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
+      await this.throwDetailedApiError(response, 'publishApi');
     }
 
     const responseData = await response.json();
@@ -483,10 +499,76 @@ ${changeDescription}
     );
 
     if (!response.ok) {
-      throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
+      await this.throwDetailedApiError(response, 'updateApi');
     }
 
     const responseData = await response.json();
     return responseData.data || responseData;
+  }
+
+  private async debugApi(apiName: string, signal: AbortSignal): Promise<any> {
+    const env = this.getEnvironment();
+    const url = `${API_BASE_URL}/api/v2/idea_plugin/apis/${apiName}/debug`;
+    const params = new URLSearchParams();
+    
+    // 添加环境参数
+    params.append('env', env);
+    
+    const response = await this.fetchWithTimeoutAndOptions(
+      `${url}?${params.toString()}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal,
+      }
+    );
+
+    if (!response.ok) {
+      await this.throwDetailedApiError(response, 'debugApi');
+    }
+
+    const responseData = await response.json();
+    return responseData.data || responseData;
+  }
+
+  private getEnvironment(): string {
+    // 从环境变量获取环境设置，默认为daily
+    return process.env.AMP_CLI_ENV || 'daily';
+  }
+
+  private async throwDetailedApiError(response: Response, operation: string): Promise<never> {
+    let errorDetails = '';
+    try {
+      // 尝试读取响应体中的错误详情
+      const errorBody = await response.text();
+      if (errorBody) {
+        try {
+          // 尝试解析为JSON
+          const errorJson = JSON.parse(errorBody);
+          if (errorJson.message) {
+            errorDetails = errorJson.message;
+          } else if (errorJson.error) {
+            errorDetails = typeof errorJson.error === 'string' ? errorJson.error : JSON.stringify(errorJson.error);
+          } else if (errorJson.errorMessage) {
+            errorDetails = errorJson.errorMessage;
+          } else {
+            errorDetails = errorBody;
+          }
+        } catch {
+          // 如果不是JSON，直接使用原始文本
+          errorDetails = errorBody;
+        }
+      }
+    } catch (error) {
+      // 如果读取响应体失败，使用默认错误信息
+      errorDetails = `无法读取错误详情: ${getErrorMessage(error)}`;
+    }
+
+    const baseError = `API调用失败: ${response.status} ${response.statusText}`;
+    const fullError = errorDetails ? `${baseError}\n详细错误: ${errorDetails}` : baseError;
+    
+    throw new Error(fullError);
   }
 } 

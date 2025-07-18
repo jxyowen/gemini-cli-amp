@@ -9,7 +9,7 @@ import { InputPrompt, InputPromptProps } from './InputPrompt.js';
 import type { TextBuffer } from './shared/text-buffer.js';
 import { Config } from '@google/gemini-cli-core';
 import { CommandContext, SlashCommand } from '../commands/types.js';
-import { vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useShellHistory } from '../hooks/useShellHistory.js';
 import { useCompletion } from '../hooks/useCompletion.js';
 import { useInputHistory } from '../hooks/useInputHistory.js';
@@ -90,6 +90,7 @@ describe('InputPrompt', () => {
       killLineLeft: vi.fn(),
       openInExternalEditor: vi.fn(),
       newline: vi.fn(),
+      backspace: vi.fn(),
     } as unknown as TextBuffer;
 
     mockShellHistory = {
@@ -340,7 +341,7 @@ describe('InputPrompt', () => {
     });
   });
 
-  it('should complete a partial parent command and add a space', async () => {
+  it('should complete a partial parent command', async () => {
     // SCENARIO: /mem -> Tab
     mockedUseCompletion.mockReturnValue({
       ...mockCompletion,
@@ -356,12 +357,12 @@ describe('InputPrompt', () => {
     stdin.write('\t'); // Press Tab
     await wait();
 
-    expect(props.buffer.setText).toHaveBeenCalledWith('/memory ');
+    expect(props.buffer.setText).toHaveBeenCalledWith('/memory');
     unmount();
   });
 
-  it('should append a sub-command when the parent command is already complete with a space', async () => {
-    // SCENARIO: /memory  -> Tab (to accept 'add')
+  it('should append a sub-command when the parent command is already complete', async () => {
+    // SCENARIO: /memory -> Tab (to accept 'add')
     mockedUseCompletion.mockReturnValue({
       ...mockCompletion,
       showSuggestions: true,
@@ -379,13 +380,12 @@ describe('InputPrompt', () => {
     stdin.write('\t'); // Press Tab
     await wait();
 
-    expect(props.buffer.setText).toHaveBeenCalledWith('/memory add ');
+    expect(props.buffer.setText).toHaveBeenCalledWith('/memory add');
     unmount();
   });
 
   it('should handle the "backspace" edge case correctly', async () => {
-    // SCENARIO: /memory  -> Backspace -> /memory -> Tab (to accept 'show')
-    // This is the critical bug we fixed.
+    // SCENARIO: /memory -> Backspace -> /memory -> Tab (to accept 'show')
     mockedUseCompletion.mockReturnValue({
       ...mockCompletion,
       showSuggestions: true,
@@ -404,8 +404,8 @@ describe('InputPrompt', () => {
     stdin.write('\t'); // Press Tab
     await wait();
 
-    // It should NOT become '/show '. It should correctly become '/memory show '.
-    expect(props.buffer.setText).toHaveBeenCalledWith('/memory show ');
+    // It should NOT become '/show'. It should correctly become '/memory show'.
+    expect(props.buffer.setText).toHaveBeenCalledWith('/memory show');
     unmount();
   });
 
@@ -425,7 +425,7 @@ describe('InputPrompt', () => {
     stdin.write('\t'); // Press Tab
     await wait();
 
-    expect(props.buffer.setText).toHaveBeenCalledWith('/chat resume fix-foo ');
+    expect(props.buffer.setText).toHaveBeenCalledWith('/chat resume fix-foo');
     unmount();
   });
 
@@ -445,7 +445,7 @@ describe('InputPrompt', () => {
     await wait();
 
     // The app should autocomplete the text, NOT submit.
-    expect(props.buffer.setText).toHaveBeenCalledWith('/memory ');
+    expect(props.buffer.setText).toHaveBeenCalledWith('/memory');
 
     expect(props.onSubmit).not.toHaveBeenCalled();
     unmount();
@@ -470,10 +470,10 @@ describe('InputPrompt', () => {
     const { stdin, unmount } = render(<InputPrompt {...props} />);
     await wait();
 
-    stdin.write('\t'); // Press Tab
+    stdin.write('\t'); // Press Tab for autocomplete
     await wait();
 
-    expect(props.buffer.setText).toHaveBeenCalledWith('/help ');
+    expect(props.buffer.setText).toHaveBeenCalledWith('/help');
     unmount();
   });
 
@@ -504,7 +504,6 @@ describe('InputPrompt', () => {
     await wait();
 
     expect(props.onSubmit).toHaveBeenCalledWith('/clear');
-    expect(props.buffer.setText).not.toHaveBeenCalledWith('/clear ');
     unmount();
   });
 
@@ -525,6 +524,50 @@ describe('InputPrompt', () => {
 
     expect(props.buffer.replaceRangeByOffset).toHaveBeenCalled();
     expect(props.onSubmit).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it('should add a newline on enter when the line ends with a backslash', async () => {
+    // This test simulates multi-line input, not submission
+    mockBuffer.text = 'first line\\';
+    mockBuffer.cursor = [0, 11];
+    mockBuffer.lines = ['first line\\'];
+
+    const { stdin, unmount } = render(<InputPrompt {...props} />);
+    await wait();
+
+    stdin.write('\r');
+    await wait();
+
+    expect(props.onSubmit).not.toHaveBeenCalled();
+    expect(props.buffer.backspace).toHaveBeenCalled();
+    expect(props.buffer.newline).toHaveBeenCalled();
+    unmount();
+  });
+
+  it('should clear the buffer on Ctrl+C if it has text', async () => {
+    props.buffer.setText('some text to clear');
+    const { stdin, unmount } = render(<InputPrompt {...props} />);
+    await wait();
+
+    stdin.write('\x03'); // Ctrl+C character
+    await wait();
+
+    expect(props.buffer.setText).toHaveBeenCalledWith('');
+    expect(mockCompletion.resetCompletionState).toHaveBeenCalled();
+    expect(props.onSubmit).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it('should NOT clear the buffer on Ctrl+C if it is empty', async () => {
+    props.buffer.text = '';
+    const { stdin, unmount } = render(<InputPrompt {...props} />);
+    await wait();
+
+    stdin.write('\x03'); // Ctrl+C character
+    await wait();
+
+    expect(props.buffer.setText).not.toHaveBeenCalled();
     unmount();
   });
 });
