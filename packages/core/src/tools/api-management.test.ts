@@ -323,6 +323,7 @@ describe('ApiManagementTool publish and debug functionality', () => {
         ok: false,
         status: 500,
         statusText: 'Internal Server Error',
+        text: vi.fn().mockResolvedValue(''),
       } as any);
 
       const result = await tool.execute({
@@ -332,6 +333,31 @@ describe('ApiManagementTool publish and debug functionality', () => {
 
       expect(result.llmContent).toContain('Error: API调用失败: 500 Internal Server Error');
       expect(result.returnDisplay).toContain('Error: API调用失败: 500 Internal Server Error');
+    });
+
+    it('should handle publish API failure with detailed error message', async () => {
+      const errorResponse = {
+        message: 'API发布失败：权限不足',
+        errorCode: 'PERMISSION_DENIED',
+        details: '用户没有发布API的权限'
+      };
+
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        text: vi.fn().mockResolvedValue(JSON.stringify(errorResponse)),
+      } as any);
+
+      const result = await tool.execute({
+        action: 'publish',
+        apiName: 'TestApi'
+      }, new AbortController().signal);
+
+      expect(result.llmContent).toContain('Error: API调用失败: 400 Bad Request');
+      expect(result.llmContent).toContain('详细错误: API发布失败：权限不足');
+      expect(result.returnDisplay).toContain('Error: API调用失败: 400 Bad Request');
+      expect(result.returnDisplay).toContain('详细错误: API发布失败：权限不足');
     });
 
     it('should use default environment when AMP_CLI_ENV is not set', async () => {
@@ -424,6 +450,7 @@ describe('ApiManagementTool publish and debug functionality', () => {
         ok: false,
         status: 404,
         statusText: 'Not Found',
+        text: vi.fn().mockResolvedValue(''),
       } as any);
 
       const result = await tool.execute({
@@ -433,6 +460,31 @@ describe('ApiManagementTool publish and debug functionality', () => {
 
       expect(result.llmContent).toContain('Error: API调用失败: 404 Not Found');
       expect(result.returnDisplay).toContain('Error: API调用失败: 404 Not Found');
+    });
+
+    it('should handle debug API failure with detailed error message', async () => {
+      const errorResponse = {
+        error: 'API调试失败',
+        errorMessage: 'API不存在或已被删除',
+        timestamp: '2024-01-15T10:30:00Z'
+      };
+
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        text: vi.fn().mockResolvedValue(JSON.stringify(errorResponse)),
+      } as any);
+
+      const result = await tool.execute({
+        action: 'debug',
+        apiName: 'NonExistentApi'
+      }, new AbortController().signal);
+
+      expect(result.llmContent).toContain('Error: API调用失败: 404 Not Found');
+      expect(result.llmContent).toContain('详细错误: API调试失败');
+      expect(result.returnDisplay).toContain('Error: API调用失败: 404 Not Found');
+      expect(result.returnDisplay).toContain('详细错误: API调试失败');
     });
 
     it('should use default environment when AMP_CLI_ENV is not set', async () => {
@@ -516,6 +568,56 @@ describe('ApiManagementTool publish and debug functionality', () => {
 
       expect(result.llmContent).toContain("Error: The 'apiName' parameter cannot be empty");
       expect(result.returnDisplay).toContain("Error: The 'apiName' parameter cannot be empty");
+    });
+  });
+
+  describe('detailed error handling', () => {
+    it('should handle non-JSON error response', async () => {
+      const plainTextError = 'Internal server error occurred while processing your request';
+
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        text: vi.fn().mockResolvedValue(plainTextError),
+      } as any);
+
+      const result = await tool.execute({
+        action: 'publish',
+        apiName: 'TestApi'
+      }, new AbortController().signal);
+
+      expect(result.llmContent).toContain('Error: API调用失败: 500 Internal Server Error');
+      expect(result.llmContent).toContain('详细错误: Internal server error occurred while processing your request');
+      expect(result.returnDisplay).toContain('Error: API调用失败: 500 Internal Server Error');
+      expect(result.returnDisplay).toContain('详细错误: Internal server error occurred while processing your request');
+    });
+
+    it('should handle error response with complex error object', async () => {
+      const errorResponse = {
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'API参数验证失败',
+          fields: ['name', 'description']
+        }
+      };
+
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        text: vi.fn().mockResolvedValue(JSON.stringify(errorResponse)),
+      } as any);
+
+      const result = await tool.execute({
+        action: 'debug',
+        apiName: 'TestApi'
+      }, new AbortController().signal);
+
+      expect(result.llmContent).toContain('Error: API调用失败: 400 Bad Request');
+      expect(result.llmContent).toContain('详细错误:');
+      expect(result.llmContent).toContain('VALIDATION_ERROR');
+      expect(result.returnDisplay).toContain('Error: API调用失败: 400 Bad Request');
     });
   });
 

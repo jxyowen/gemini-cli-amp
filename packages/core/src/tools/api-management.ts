@@ -313,7 +313,7 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
     );
 
     if (!response.ok) {
-      throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
+      await this.throwDetailedApiError(response, 'getApi');
     }
 
     const responseData = await response.json();
@@ -332,7 +332,7 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
     );
 
     if (!response.ok) {
-      throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
+      await this.throwDetailedApiError(response, 'listApiNames');
     }
 
     const responseData = await response.json();
@@ -482,7 +482,7 @@ ${changeDescription}
     );
 
     if (!response.ok) {
-      throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
+      await this.throwDetailedApiError(response, 'publishApi');
     }
 
     const responseData = await response.json();
@@ -505,7 +505,7 @@ ${changeDescription}
     );
 
     if (!response.ok) {
-      throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
+      await this.throwDetailedApiError(response, 'updateApi');
     }
 
     const responseData = await response.json();
@@ -538,7 +538,7 @@ ${changeDescription}
     );
 
     if (!response.ok) {
-      throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
+      await this.throwDetailedApiError(response, 'debugApi');
     }
 
     const responseData = await response.json();
@@ -548,5 +548,39 @@ ${changeDescription}
   private getEnvironment(): string {
     // 从环境变量获取环境设置，默认为daily
     return process.env.AMP_CLI_ENV || 'daily';
+  }
+
+  private async throwDetailedApiError(response: Response, operation: string): Promise<never> {
+    let errorDetails = '';
+    try {
+      // 尝试读取响应体中的错误详情
+      const errorBody = await response.text();
+      if (errorBody) {
+        try {
+          // 尝试解析为JSON
+          const errorJson = JSON.parse(errorBody);
+          if (errorJson.message) {
+            errorDetails = errorJson.message;
+          } else if (errorJson.error) {
+            errorDetails = typeof errorJson.error === 'string' ? errorJson.error : JSON.stringify(errorJson.error);
+          } else if (errorJson.errorMessage) {
+            errorDetails = errorJson.errorMessage;
+          } else {
+            errorDetails = errorBody;
+          }
+        } catch {
+          // 如果不是JSON，直接使用原始文本
+          errorDetails = errorBody;
+        }
+      }
+    } catch (error) {
+      // 如果读取响应体失败，使用默认错误信息
+      errorDetails = `无法读取错误详情: ${getErrorMessage(error)}`;
+    }
+
+    const baseError = `API调用失败: ${response.status} ${response.statusText}`;
+    const fullError = errorDetails ? `${baseError}\n详细错误: ${errorDetails}` : baseError;
+    
+    throw new Error(fullError);
   }
 } 
