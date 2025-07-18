@@ -5,10 +5,9 @@
  */
 
 import * as Diff from 'diff';
-import * as fs from 'fs';
-import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { SchemaValidator } from '../utils/schemaValidator.js';
+import { apiJsonSchema } from '../core/apiJsonSchema.js';
 import {
   BaseTool,
   ToolResult,
@@ -375,26 +374,18 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
   }
 
   private async editApi(apiName: string, changeDescription: string, signal: AbortSignal): Promise<any> {
-    // 使用相对路径来获取schema文件（相对于项目根目录）
-    const schemaPath = path.resolve('packages/core/src/core/apiJsonSchema.yml');
     try {
       // 1. 获取当前API定义
       const currentApiData = await this.getApi(apiName, signal);
       
-      // 2. 读取API JSON Schema
-      let apiSchema = '';
-      try {
-        apiSchema = fs.readFileSync(schemaPath, 'utf8');
-      } catch (error) {
-        console.warn('无法读取apiJsonSchema.yml文件，将继续使用基本的修改逻辑');
-        apiSchema = '# API Schema not available';
-      }
+      // 2. 获取API JSON Schema
+      const apiSchema = JSON.stringify(apiJsonSchema, null, 2);
       
       // 3. 构建提示词
       const prompt = `你是一个阿里云API设计专家。请根据以下API JSON Schema规范和用户的修改要求，修改给定的API定义。
 
 API JSON Schema规范：
-\`\`\`yaml
+\`\`\`json
 ${apiSchema}
 \`\`\`
 
