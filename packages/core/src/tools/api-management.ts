@@ -31,7 +31,7 @@ const API_BASE_URL = 'https://pre-cs.api.aliyun-inc.com';
  * 通用API管理工具参数
  */
 export interface ApiManagementToolParams {
-  action: 'get' | 'edit' | 'publish' | 'list';
+  action: 'get' | 'edit' | 'publish' | 'debug' | 'list';
   apiName?: string;
   changeDescription?: string;
 }
@@ -48,14 +48,14 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
     super(
       ApiManagementTool.Name,
       '镇元(阿里云) API 管理',
-      '本工具专用于管理镇元API、阿里云API等接口的全生命周期，包括API获取、修改、发布、列表查询等。',
+      '本工具专用于管理镇元API、阿里云API等接口的全生命周期，包括API获取、修改、发布、调试、列表查询等。',
       Icon.Globe,
       {
         properties: {
           action: {
-            description: '要执行的操作类型：get（获取API）、edit（修改API定义和参数）、publish（发布API）、list（获取API名称列表）',
+            description: '要执行的操作类型：get（获取API）、edit（修改API定义和参数）、publish（发布API）、debug（调试API）、list（获取API名称列表）',
             type: Type.STRING,
-            enum: ['get', 'edit', 'publish', 'list'],
+            enum: ['get', 'edit', 'publish', 'debug', 'list'],
           },
           apiName: {
             description: '需要管理的API名称（如：CreateInstance、ListUsers 等），list操作时可选',
@@ -98,6 +98,8 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
         return `修改API定义: ${params.apiName} - ${params.changeDescription}`;
       case 'publish':
         return `发布API到网关: ${params.apiName}`;
+      case 'debug':
+        return `调试API: ${params.apiName}`;
       case 'list':
         return `获取API名称列表`;
       default:
@@ -118,8 +120,8 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
       return false;
     }
 
-    // 只有get和list操作不需要人工确认，edit和publish都需要确认
-    if (params.action === 'get' || params.action === 'list') {
+    // 只有get、list和debug操作不需要人工确认，edit和publish需要确认
+    if (params.action === 'get' || params.action === 'list' || params.action === 'debug') {
       return false;
     }
 
@@ -179,7 +181,8 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
     }
 
     const actionDescriptions = {
-      publish: '发布API到网关'
+      publish: '发布API到网关',
+      debug: '调试API'
     };
 
     return {
@@ -266,6 +269,14 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
           }
           result = await this.publishApi(params.apiName, signal);
           displayMessage = `成功发布API到网关: ${params.apiName}`;
+          displayResult = `${displayMessage}\n\n${JSON.stringify(result, null, 2)}`;
+          break;
+        case 'debug':
+          if (!params.apiName) {
+            throw new Error('apiName参数是必需的');
+          }
+          result = await this.debugApi(params.apiName, signal);
+          displayMessage = `成功调试API: ${params.apiName}`;
           displayResult = `${displayMessage}\n\n${JSON.stringify(result, null, 2)}`;
           break;
         case 'list':
@@ -364,9 +375,8 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
   }
 
   private async editApi(apiName: string, changeDescription: string, signal: AbortSignal): Promise<any> {
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const schemaPath = path.join(__dirname, '../core/apiJsonSchema.yml');
+    // 使用相对路径来获取schema文件（相对于项目根目录）
+    const schemaPath = path.resolve('packages/core/src/core/apiJsonSchema.yml');
     try {
       // 1. 获取当前API定义
       const currentApiData = await this.getApi(apiName, signal);
@@ -447,8 +457,18 @@ ${changeDescription}
   }
 
   private async publishApi(apiName: string, signal: AbortSignal): Promise<any> {
-    const url = `${API_BASE_URL}/test/publish_api`;
-    const params = new URLSearchParams({ apiName });
+    const env = this.getEnvironment();
+    const url = `${API_BASE_URL}/api/v2/idea_plugin/apis/${apiName}/publish`;
+    const params = new URLSearchParams();
+    
+    // 添加环境变量中的projectUuid（如果存在）
+    const projectUuid = process.env.AMP_CLI_PROJECT;
+    if (projectUuid) {
+      params.append('projectUuid', projectUuid);
+    }
+    
+    // 添加环境参数
+    params.append('env', env);
     
     const response = await this.fetchWithTimeoutAndOptions(
       `${url}?${params.toString()}`,
@@ -490,5 +510,43 @@ ${changeDescription}
 
     const responseData = await response.json();
     return responseData.data || responseData;
+  }
+
+  private async debugApi(apiName: string, signal: AbortSignal): Promise<any> {
+    const env = this.getEnvironment();
+    const url = `${API_BASE_URL}/api/v2/idea_plugin/apis/${apiName}/debug`;
+    const params = new URLSearchParams();
+    
+    // 添加环境变量中的projectUuid（如果存在）
+    const projectUuid = process.env.AMP_CLI_PROJECT;
+    if (projectUuid) {
+      params.append('projectUuid', projectUuid);
+    }
+    
+    // 添加环境参数
+    params.append('env', env);
+    
+    const response = await this.fetchWithTimeoutAndOptions(
+      `${url}?${params.toString()}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal,
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`API调用失败: ${response.status} ${response.statusText}`);
+    }
+
+    const responseData = await response.json();
+    return responseData.data || responseData;
+  }
+
+  private getEnvironment(): string {
+    // 从环境变量获取环境设置，默认为daily
+    return process.env.AMP_CLI_ENV || 'daily';
   }
 } 
