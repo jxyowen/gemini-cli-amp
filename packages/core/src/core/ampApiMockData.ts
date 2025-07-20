@@ -141,7 +141,7 @@ export const getApiData = {
       "HasUserRolesCheckV2": {
         "summary": "查询用户是否有指定角色V2123",
         "methods": [
-          "post"
+          "get"
         ],
         "schemes": [
           "https"
@@ -162,15 +162,8 @@ export const getApiData = {
           "responseLog": true
         },
         "backendService": {
-          "protocol": "hsf",
-          "invokeType": "Single",
-          "group": "HSF",
-          "version": "1.0.0",
-          "service": "com.aliyun.amp.v2.client.auth.hsf.AuthHsfService",
-          "method": "HasUserRolesCheckV2",
-          "paramTypes": [
-            "com.aliyun.amp.v2.client.auth.dto.QueryUserRoleParam"
-          ],
+          "protocol": "http",
+          "url": "http://127.0.0.1:8080/helloworld/simple/chat",
           "timeout": 10000,
           "retries": -1
         },
