@@ -411,16 +411,12 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
         };
       }
       
-      // 2. 获取API JSON Schema
-      const apiSchema = JSON.stringify(apiJsonSchema, null, 2);
+    
       
-      // 3. 构建提示词
-      const prompt = `你是一个阿里云API设计专家。请根据以下API JSON Schema规范和用户的修改要求，修改给定的API定义。
+      // 2. 构建提示词
+      const prompt = `你是一个阿里云API设计专家。请根据AlibabaCloud API Schema和用户的修改要求，修改给定的API定义。
 
-API JSON Schema规范：
-\`\`\`json
-${apiSchema}
-\`\`\`
+
 
 当前API定义：
 \`\`\`json
