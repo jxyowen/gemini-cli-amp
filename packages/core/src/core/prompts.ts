@@ -57,6 +57,15 @@ You are an interactive CLI agent specializing in software engineering and api ma
 
 ${JSON.stringify(apiJsonSchema, null, 2)}
 
+# Alibaba Cloud API Schema to Java Code Generation Rules
+
+${getSchemaToCodeRules()}
+
+
+
+
+
+
 # Primary Workflows
 
 ## API Lifecycle Management Tasks
@@ -384,8 +393,6 @@ export function getSchemaToCodeRules(): string {
 
 因此，代码生成器首先需要读取 \`protocol\` 字段，然后根据其值将生成任务分发到不同的处理器。
 
-![image](https://user-images.githubusercontent.com/106393219/201522831-01e5124a-754b-410a-871a-111181818059.png)
-
 ---
 
 ## 2. 生成 HSF/Dubbo 服务接口
@@ -401,7 +408,7 @@ export function getSchemaToCodeRules(): string {
 3.  **方法返回类型**: 通过解析 \`responses.200.schema\` 对象生成。生成器需要递归地将 Schema 中的 \`Struct\` 对象（包括其 \`type\`, \`format\`, \`properties\`, \`items\` 等）映射回 Java 类型（详见第 4 节的类型映射表）。
     *   如果 Schema 结构暗示了某种包装（例如，包含 \`success\`, \`data\` 等字段），生成器可能会生成一个泛型的 \`Result<T>\` 类，其中 \`T\` 是业务数据的具体类型。
 
-### 2.3. 名称生成 (\`backendName\` -> Java 字段)
+### 2.3. 参数名称生成 (\`backendName\` -> Java 字段)
 
 从 Schema 生成 Java 字段时，名称的处理规则如下：
 
