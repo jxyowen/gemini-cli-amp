@@ -28,9 +28,15 @@
 3.  **方法返回类型**: 通过解析 `responses.200.schema` 对象生成。生成器需要递归地将 Schema 中的 `Struct` 对象（包括其 `type`, `format`, `properties`, `items` 等）映射回 Java 类型（详见第 4 节的类型映射表）。
     *   如果 Schema 结构暗示了某种包装（例如，包含 `success`, `data` 等字段），生成器可能会生成一个泛型的 `Result<T>` 类，其中 `T` 是业务数据的具体类型。
 
-### 2.2. 方法参数生成
+### 2.3. 名称生成 (`backendName` -> Java 字段)
 
-这是 RPC 风格生成中最复杂的部分，因为它需要将 API Schema 中扁平化的参数列表重新组合成 Java 方法的参数。
+从 Schema 生成 Java 字段时，名称的处理规则如下：
+
+*   **Java 字段/参数名**: **始终以来源 Schema 中的 `backendName` 字段为准**。`backendName` 保存了原始的、未经转换的后端变量名，是生成代码时最可靠的依据。例如，`"backendName": "userAge"` 将生成 `private String userAge;`。
+
+*   **前端参数名 (`name`) 的作用**: Schema 中的 `name` 字段（前端参数名）主要用于生成注解。如果 `name` 和 `backendName` 不一致（例如，`name` 是 `user_age`，而 `backendName` 是 `userAge`），则需要添加 `@JsonProperty("user_age")` 这样的注解来处理名称映射。这确保了 Java 代码遵循其自身的命名规范（如驼峰式），同时能正确接收来自前端的、不同命名规范的参数。
+
+*   **参数注解**: 对于 Controller，`@PathVariable("id")`, `@RequestParam("version")` 等注解的值，应该使用 Schema 参数中的 `name` 字段。
 
 **核心规则**:
 
