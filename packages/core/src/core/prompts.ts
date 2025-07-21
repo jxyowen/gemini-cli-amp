@@ -20,6 +20,17 @@ import { MemoryTool, GEMINI_CONFIG_DIR } from '../tools/memoryTool.js';
 import { apiJsonSchema } from './apiJsonSchema.js';
 
 export function getCoreSystemPrompt(userMemory?: string): string {
+  // Read schema to java generation rules from md file
+  // const mdFilePath = path.resolve(process.cwd(), 'packages/core/src/resource/schema_to_java_generation_rules.md');
+  // let mdContent = '';
+  // try {
+  //   if (fs.existsSync(mdFilePath)) {
+  //     mdContent = fs.readFileSync(mdFilePath, 'utf8');
+  //   }
+  // } catch (error) {
+  //   console.warn(`Failed to read md file: ${mdFilePath}`, error);
+  // }
+
   // if GEMINI_SYSTEM_MD is set (and not 0|false), override system prompt from file
   // default path is .gemini/system.md but can be modified via custom path in GEMINI_SYSTEM_MD
   let systemMdEnabled = false;
@@ -60,8 +71,6 @@ ${JSON.stringify(apiJsonSchema, null, 2)}
 # Alibaba Cloud API Schema to Java Code Generation Rules
 
 ${getSchemaToCodeRules()}
-
-
 
 
 
@@ -380,172 +389,5 @@ The structure MUST be as follows:
 
 
 export function getSchemaToCodeRules(): string {
-  return `# 从 AlibabaCloud API Schema 生成 Java 后端代码的规则分析
-
-本文档旨在提供一个从 AlibabaCloud API Gateway 标准 Schema 反向生成 Java 后端代码（包括 HSF/Dubbo 接口和 Spring Controller）的规则和指南。该分析基于 \`amp-idea-plugin\` 的转换逻辑，并将其反转。
-
-## 1. 核心识别与分发逻辑
-
-生成过程的起点是解析 API Schema，其中最关键的部分是 \`backendService\` 对象。该对象的 \`protocol\` 字段是决定生成何种 Java 代码的核心依据。
-
-*   **\`backendService.protocol\` = \`HSF\` 或 \`DUBBO\`**: 生成一个 Java **接口 (interface)**，遵循 RPC 开发模式。
-*   **\`backendService.protocol\` = \`HTTP\`**: 生成一个 Java **类 (class)**，并使用 Spring Web 注解（如 \`@RestController\`, \`@RequestMapping\` 等）来构建一个 Controller。
-
-因此，代码生成器首先需要读取 \`protocol\` 字段，然后根据其值将生成任务分发到不同的处理器。
-
----
-
-## 2. 生成 HSF/Dubbo 服务接口
-
-当 \`backendService.protocol\` 为 \`HSF\` 或 \`DUBBO\` 时，目标是生成一个纯粹的 Java 接口。
-
-### 2.1. 接口和方法签名
-
-1.  **接口名称**: 由 \`backendService.service\` 字段直接决定。例如，\`"service": "com.aliyun.amp.demo.api.DemoService"\` 将生成 \`public interface DemoService { ... }\`。
-
-2.  **方法名称**: 由 \`backendService.method\` 字段决定。
-
-3.  **方法返回类型**: 通过解析 \`responses.200.schema\` 对象生成。生成器需要递归地将 Schema 中的 \`Struct\` 对象（包括其 \`type\`, \`format\`, \`properties\`, \`items\` 等）映射回 Java 类型（详见第 4 节的类型映射表）。
-    *   如果 Schema 结构暗示了某种包装（例如，包含 \`success\`, \`data\` 等字段），生成器可能会生成一个泛型的 \`Result<T>\` 类，其中 \`T\` 是业务数据的具体类型。
-
-### 2.3. 参数名称生成 (\`backendName\` -> Java 字段)
-
-从 Schema 生成 Java 字段时，名称的处理规则如下：
-
-*   **Java 字段/参数名**: **始终以来源 Schema 中的 \`backendName\` 字段为准**。\`backendName\` 保存了原始的、未经转换的后端变量名，是生成代码时最可靠的依据。例如，\`"backendName": "userAge"\` 将生成 \`private String userAge;\`。
-
-*   **前端参数名 (\`name\`) 的作用**: Schema 中的 \`name\` 字段（前端参数名）主要用于生成注解。如果 \`name\` 和 \`backendName\` 不一致（例如，\`name\` 是 \`user_age\`，而 \`backendName\` 是 \`userAge\`），则需要添加 \`@JsonProperty("user_age")\` 这样的注解来处理名称映射。这确保了 Java 代码遵循其自身的命名规范（如驼峰式），同时能正确接收来自前端的、不同命名规范的参数。
-
-*   **参数注解**: 对于 Controller，\`@PathVariable("id")\`, \`@RequestParam("version")\` 等注解的值，应该使用 Schema 参数中的 \`name\` 字段。
-
-**核心规则**:
-
-1.  **参数重组依据**: \`parameter.schema\` 对象中的 \`groupIndex\` 和 \`index\` 字段是重组参数的关键。
-    *   \`index\`: 用于表示简单类型参数（如 \`String\`, \`int\` 等基本类型）在方法签名中的顺序（从1开始）。
-    *   \`groupIndex\`: 用于表示一个参数是 POJO 的一级字段，并且这个 \`groupIndex\` 代表了该 POJO 在方法参数中的顺序（从1开始）。所有具有相同 \`groupIndex\` 的 API 参数将被聚合到同一个 POJO 对象中。
-
-2.  **参数类型来源**: \`backendService.paramTypes\` 数组提供了最准确的参数类型信息。它是一个包含了每个参数完全限定名的字符串列表。生成器应优先使用此列表来确定方法签名。
-
-3.  **生成逻辑**:
-    *   遍历 API Schema 中的 \`parameters\` 列表。
-    *   使用一个 Map，以 \`groupIndex\` 为键，将参数分组。
-    *   **对于有 \`groupIndex\` 的参数**: 这些参数属于一个 POJO。需要为这个 \`groupIndex\` 生成一个新的 Java 类，类名可以根据上下文推断（例如，使用 \`paramTypes\` 中对应的类名）。该 POJO 的字段由所有共享此 \`groupIndex\` 的 API 参数构成。
-    *   **对于没有 \`groupIndex\` 的参数**: 这些是方法的直接参数（如 \`String\`, \`int\` 等基本类型或简单对象）。
-    *   最终，根据 \`paramTypes\` 数组和解析出的参数，构建完整的方法签名。
-
-**示例**:
-
-*   **API Schema (部分)**:
-    \`\`\`json
-    {
-      "backendService": {
-        "protocol": "HSF",
-        "service": "com.aliyun.amp.demo.api.UserService",
-        "method": "updateUser",
-        "paramTypes": ["java.lang.String", "com.aliyun.amp.demo.model.UserDTO"]
-      },
-      "parameters": [
-        { "name": "userId", "in": "query", "schema": { "type": "string", "index": 1 } },
-        { "name": "name", "in": "query", "schema": { "type": "string", "groupIndex": 2 } },
-        { "name": "age", "in": "query", "schema": { "type": "integer", "groupIndex": 2 } }
-      ]
-    }
-    \`\`\`
-
-*   **生成的 Java 代码**:
-    \`\`\`java
-    // 需要生成 UserDTO.java
-    public class UserDTO {
-        private String name;
-        private int age;
-        // getters and setters
-    }
-
-    // 生成的 HSF 接口
-    public interface UserService {
-        Result<Void> updateUser(String userId, UserDTO user);
-    }
-    \`\`\`
-
----
-
-## 3. 生成 Spring Controller
-
-当 \`backendService.protocol\` 为 \`HTTP\` 时，目标是生成一个带有 Spring Web 注解的 Java Controller 类。
-
-### 3.1. 类和方法注解
-
-1.  **类注解**: 生成的类应标记为 \`@RestController\`。
-    *   可以从 API 的 \`path\` 中提取公共前缀作为类级别的 \`@RequestMapping\`。例如，如果 \`path\` 是 \`/api/v1/users/{id}\`，则类注解可以是 \`@RequestMapping("/api/v1/users")\`。
-
-2.  **方法注解**: 由 API 的 \`path\` 和 \`method\` 字段决定。
-    *   \`method: "get"\` 对应 \`@GetMapping\`。
-    *   \`method: "post"\` 对应 \`@PostMapping\`。
-    *   注解的值是 \`path\` 中剩余的部分。例如，对于 \`/api/v1/users/{id}\`，方法注解是 \`@GetMapping("/{id}")\`。
-
-### 3.2. 方法签名和参数
-
-1.  **方法名称**: Schema 中没有直接提供方法名。可以根据 HTTP 方法和路径生成一个描述性的名称，例如 \`getUserById\` 或 \`createUser\`。
-
-2.  **返回类型**: 与 HSF 规则相同，通过解析 \`responses.200.schema\` 生成。对于 Spring，可以考虑生成 \`ResponseEntity<T>\` 来提供更灵活的 HTTP 响应控制。
-
-3.  **方法参数**: 由 \`parameters\` 列表决定，主要依据是每个参数的 \`in\` 字段。
-    *   \`in: "path"\` -> 生成带 \`@PathVariable\` 的参数。
-    *   \`in: "query"\` -> 生成带 \`@RequestParam\` 的参数。
-    *   \`in: "header"\` -> 生成带 \`@RequestHeader\` 的参数。
-    *   \`in: "body"\` -> 生成带 \`@RequestBody\` 的参数。该参数的类型是一个需要根据其 \`schema\` 定义生成的 POJO。
-    *   \`in: "formData"\` -> 如果是文件上传 (\`type: "file"\`)，则生成 \`MultipartFile\` 类型的参数。否则，生成带 \`@RequestParam\` 的参数。
-
-**示例**:
-
-*   **API Schema (部分)**:
-    \`\`\`json
-    {
-      "path": "/users/{id}",
-      "method": "put",
-      "backendService": { "protocol": "HTTP", ... },
-      "parameters": [
-        { "name": "id", "in": "path", "schema": { "type": "string" }, "required": true },
-        { "name": "token", "in": "header", "schema": { "type": "string" } },
-        { "name": "user", "in": "body", "schema": { "$ref": "#/components/schemas/User" } }
-      ]
-    }
-    \`\`\`
-
-*   **生成的 Java 代码**:
-    \`\`\`java
-    @RestController
-    @RequestMapping("/users")
-    public class UserController {
-
-        @PutMapping("/{id}")
-        public ResponseEntity<User> updateUser(
-            @PathVariable String id,
-            @RequestHeader(required = false) String token,
-            @RequestBody User user) {
-            // ... implementation
-        }
-    }
-    \`\`\`
-
----
-
-## 4. 通用数据类型映射规则 (Schema 到 Java)
-
-无论是生成 HSF 接口还是 Controller，将 Schema 类型映射到 Java 类型的规则是通用的。
-
-| API Schema 类型 | 格式 (\`format\`) | 生成的 Java 类型 | 备注 |
-| :--- | :--- | :--- | :--- |
-| \`string\` | (无) | \`String\` | |
-| \`string\` | \`byte\` | \`byte[]\` | |
-| \`string\` | \`date\` | \`java.time.LocalDate\` | |
-| \`string\` | \`date-time\` | \`java.util.Date\` 或 \`java.time.LocalDateTime\` | 这是一个设计选择。 |
-| \`integer\` | \`int32\` | \`int\` / \`Integer\` | |
-| \`integer\` | \`int64\` | \`long\` / \`Long\` | |
-| \`number\` | \`float\` | \`float\` / \`Float\` | |
-| \`number\` | \`double\` | \`double\` / \`Double\` | |
-| \`boolean\` | (无) | \`boolean\` / \`Boolean\` | |
-| \`array\` | (无) | \`java.util.List<T>\` | \`T\` 是通过递归解析 \`items\` 字段的 Schema 生成的类型。 |
-| \`object\` | (无) | \`java.util.Map<String, V>\` 或 **POJO** | 如果存在 \`properties\`，则生成一个 POJO 类。如果存在 \`additionalProperties\`，则生成一个 Map，其中 \`V\` 是递归解析 \`additionalProperties\` 的 Schema 生成的类型。 |
-| \`file\` | (无) | \`org.springframework.web.multipart.MultipartFile\` | 仅适用于 HTTP \`formData\` 请求。 |`;
+  return "# AlibabaCloud API Schema 与 HSF/Controller 的转换规则分析\n\n本文档基于对 `amp-idea-plugin` 源码的分析，详细阐述了如何将 Java 代码（HSF 服务接口和 Spring Controller）转换为 Alibaba Cloud API Gateway 的标准 API Schema。\n\n## 1. 总体转换流程\n\n转换过程主要分为两个阶段：\n\n1.  **代码解析到中间模型**:\n    *   `ApiParser` 作为入口，负责解析一个 `PsiMethod` (Java 方法)。\n    *   它会根据方法的注解（如 Spring Controller 的 `@RequestMapping` 或 HSF 的自定义注解）和配置，判断后端协议是 **HTTP** 还是 **HSF/DUBBO**。\n    *   随后，它调用 `RequestParser`, `ResponseParser`, 和 `PathParser` 等模块，将 Java 方法的路径、参数、返回值等信息解析成一个中间模型 `Api` 对象。这个对象是对原始 Java 代码的结构化表示。\n\n2.  **中间模型到 API Schema**:\n    *   `AmpDataConvector` 类接收第一阶段生成的 `Api` 中间模型对象。\n    *   它根据 `Api` 对象中的信息，特别是 `backendProtocolEnum` (后端协议类型) 和 `apiStyleEnum` (API 风格，如 RPC/RESTful)，将其转换为 `com.aliyun.openapi.spec.model.api.Api` 对象，这即是最终的 Alibaba Cloud API Schema。\n    *   此过程会处理参数映射、响应结构包装、后端服务配置（BackendService）等关键步骤。\n\n![image](https://user-images.githubusercontent.com/106393219/201522393-52711363-b31c-4249-880a-138510099712.png)\n\n---\n\n## 2. HSF 服务接口转换规则\n\n当后端协议被识别为 `HSF` 或 `DUBBO` 时，遵循以下 RPC 风格的转换规则。\n\n### 2.1. 请求 (Request) 转换\n\nHSF 接口的请求转换主要由 `RequestParser.parseRpcParameters` 和 `AmpDataConvector.convertRpcBackendParameters` 处理。\n\n**核心规则**:\n\n1.  **参数扁平化 (Flattening)**:\n    *   **单个复杂对象参数**: 如果 HSF 方法只有一个参数，且该参数是一个复杂的 POJO（Plain Old Java Object），转换器会默认将这个 POJO 的所有字段“扁平化”，即将每个字段作为 API 的一个独立请求参数。\n    *   **多个参数**: 如果方法有多个参数，每个参数会作为 API 的一个独立请求参数。如果其中某个参数是复杂 POJO，它同样会被扁平化，其字段成为 API 的顶级参数。\n\n2.  **参数位置 (`in`)**:\n    *   对于 RPC 风格的 API，前端参数的位置 (`in`) 通常由插件配置决定，默认为 `formData` 或 `query`。\n    *   `@AmpIn` 注解可以强制指定参数位置，例如 `@AmpIn(\"body\")` 会将参数放入请求体。\n\n3.  **参数索引 (`index`, `groupIndex`)**:\n    *   当有多个参数或一个参数的多个字段被映射时，系统使用 `index` 和 `groupIndex` 来告诉后端 HSF 服务如何重组这些参数。\n    *   `index`: 用于表示简单类型参数（如 `String`, `int` 等基本类型）在方法签名中的顺序（从1开始）。\n    *   `groupIndex`: 用于表示一个参数是 POJO 的一级字段，并且这个 `groupIndex` 代表了该 POJO 在方法参数中的顺序（从1开始）。所有具有相同 `groupIndex` 的 API 参数将被聚合到同一个 POJO 对象中。\n    *   这套索引机制确保了网关可以将前端传入的扁平化键值对，精确地反序列化为 HSF 方法所需的、具有正确顺序和结构的 Java 对象。\n\n4.  **后端服务配置 (`BackendService`)**:\n    *   `protocol`: 设置为 `HSF` 或 `DUBBO`。\n    *   `service`: 设置为 HSF 接口的完全限定名 (e.g., `com.example.UserService`)。\n    *   `method`: 设置为调用的方法名。\n    *   `paramTypes`: 一个字符串列表，包含方法每个参数的 Java 类型，用于 HSF 泛化调用。\n\n**示例**:\n\n*   **Java HSF 接口**:\n    ```java\n    public class User {\n        private String name;\n        private int age;\n    }\n    public interface UserService {\n        Result<User> findUser(String name, int age);\n    }\n    ```\n\n*   **转换后的 API 请求参数**:\n    *   `name`: in: `query`, type: `string`\n    *   `age`: in: `query`, type: `integer`\n\n### 2.2. 响应 (Response) 转换\n\nHSF 接口的响应转换主要由 `ResponseParser`, `KernelParser` 和 `AmpDataConvector` 处理。\n\n**核心规则**:\n\n1.  **返回类型解析与解包 (Return Type Resolution & Unwrapping)**:\n    *   `ResponseParser` 首先解析方法的返回类型 (`PsiType`)。\n    *   它会自动“解包”常用的包装类，如 `java.util.concurrent.Future`, `reactor.core.publisher.Mono` 等，以获取内部的实际业务对象类型。\n    *   `@ApiResponseClassName` 注解可以被用来强制指定一个不同于方法签名的返回类型，这在返回类型是泛型或接口时特别有用。\n\n2.  **结构体转换 (Struct Conversion)**:\n    *   `KernelParser` 负责将解析出的 Java 类型（通常是一个 POJO）递归地转换为一个 `Struct` 对象。\n    *   这个转换过程遵循[第 4 节的通用数据类型转换规则](#4-通用数据类型转换规则)。\n    *   最终生成的 `Struct` 对象包含了字段的类型、名称、描述等详细信息，并被置于 API Schema 的 `responses.200.schema` 路径下。\n\n3.  **响应包装 (Response Wrapping)**:\n    *   系统支持对最终的响应 `Struct` 进行统一包装。例如，可以配置一个全局的包装器，为所有响应添加一个包含 `success`, `code`, `data` 等字段的外层结构。\n    *   这个包装逻辑由 `AmpDataConvector.wrapResponse` 实现，具体的包装结构在插件的配置中定义。\n    *   `@ApiResponseWrapper` 注解提供了更细粒度的控制，可以为特定的 API 指定一个预定义的包装器，或者通过 `__disable__` 值来禁用该 API 的默认包装。\n\n### 2.3. 名称转换 (`name` vs `backendName`)\n\n在将 Java 字段转换为 Schema 参数/属性时，名称处理是一个关键步骤。\n\n*   **`backendName`**: 在 Schema 的 `parameter.schema` 或 `struct.properties` 的 `Struct` 对象中，`backendName` 字段 **始终存储 Java 代码中原始的字段或参数名**。例如，Java 字段 `private String userAge;`，其对应的 `backendName` 就是 `userAge`。这是为了在反向生成或问题追溯时保留原始代码的引用。\n\n*   **`name`**: 这是最终暴露给 API 调用者的 **前端参数名**。它的生成规则如下：\n    1.  **注解优先**: 优先使用 `@JsonProperty` (Jackson)、`@AmpName` 或其他相关注解中指定的值。\n    2.  **命名策略转换**: 如果没有注解指定名称，系统会应用一个全局的命名转换策略（`NameConversionRuleEnum`），例如从驼峰式（`camelCase`）转换为下划线式（`snake_case`）。Java 字段 `userAge` 可能会被转换为 `user_age`。\n    3.  **默认值**: 如果没有配置转换策略，则 `name` 与 `backendName` 保持一致。\n\n这个分离确保了后端代码的命名规范可以独立于前端 API 的命名规范，提供了更大的灵活性。\n\n---\n\n## 3. Spring Controller 转换规则\n\n当后端协议被识别为 `HTTP` 时，遵循以下 RESTful 风格的转换规则。\n\n### 3.1. 请求 (Request) 转换\n\nController 的请求转换涉及 `PathParser`, `RequestParser.parseHttpRequest`, 和 `AmpDataConvector.convertHttpBackendParameters`。\n\n**核心规则**:\n\n1.  **路径和方法 (`path`, `method`)**:\n    *   `PathParser` 解析 `@RequestMapping`, `@GetMapping`, `@PostMapping` 等注解，提取出 API 的请求路径 (`path`) 和 HTTP 方法 (`method`)。\n    *   类级别和方法级别的 `@RequestMapping` 路径会被拼接起来。\n    *   `@AmpHttpPath` 和 `@AmpHttpMethod` 注解可以覆盖从 Spring 注解中解析出的值。\n\n2.  **参数位置 (`in`)**:\n    *   参数的位置是根据 Spring MVC 的标准注解自动推断的：\n        *   `@PathVariable`: `in` 设置为 `path`。\n        *   `@RequestHeader`: `in` 设置为 `header`。\n        *   `@RequestParam`: `in` 设置为 `query`。\n        *   `@RequestBody`: `in` 设置为 `body`。参数会被序列化为 JSON。\n        *   无注解的 POJO 参数: 默认其所有字段作为 `query` 参数进行扁平化处理。\n    *   `@AmpHttpIn` 注解可以覆盖上述默认行为。\n\n3.  **请求体 (`RequestBody`)**:\n    *   当一个参数被标记为 `@RequestBody` 时，`RequestParser` 会将其解析为一个 `body` 参数。\n    *   API 的 `consumes` 字段会根据情况设置为 `application/json`, `application/x-www-form-urlencoded`, 或 `multipart/form-data`。\n\n4.  **后端服务配置 (`BackendService`)**:\n    *   `protocol`: 设置为 `HTTP`。\n    *   `url`: 构建后端的完整请求 URL。它通常由一个基础地址（如 `http://www.demo.com`）和从 `@RequestMapping` 解析出的路径拼接而成。\n    *   `httpMethod`: 设置为从注解中解析出的 HTTP 方法（`GET`, `POST` 等）。\n\n**示例**:\n\n*   **Java Spring Controller**:\n    ```java\n    @RestController\n    @RequestMapping(\"/users\")\n    public class UserController {\n        @GetMapping(\"/{id}\")\n        public User getUserById(@PathVariable String id, @RequestParam String version) { ... }\n\n        @PostMapping\n        public Result createUser(@RequestBody User user) { ... }\n    }\n    ```\n\n*   **转换后的 API (`getUserById`)**:\n    *   `path`: `/users/{id}`\n    *   `method`: `get`\n    *   **Parameters**:\n        *   `id`: in: `path`, required: `true`\n        *   `version`: in: `query`\n\n*   **转换后的 API (`createUser`)**:\n    *   `path`: `/users`\n    *   `method`: `post`\n    *   **Parameters**:\n        *   `user`: in: `body`, (schema reflects the `User` class structure)\n\n### 3.2. 响应 (Response) 转换\n\nController 的响应转换规则与 HSF 的基本一致，同样由 `ResponseParser` 和 `AmpDataConvector` 处理。它会自动解包 `org.springframework.http.ResponseEntity` 等 Spring 特有的返回类型。\n\n---\n\n## 4. 通用数据类型转换规则\n\n`KernelParser` 和 `DataTypeParser` 负责将 Java 类型转换为 JSON Schema 的数据类型，此规则对 HSF 和 Controller 通用。\n\n| Java 类型 | 转换后 API Schema 类型 | 格式 (`format`) | 备注 |\n| :--- | :--- | :--- | :--- |\n| `String` | `string` | - | |\n| `char`, `Character` | `string` | - | |\n| `int`, `Integer` | `integer` | `int32` | |\n| `long`, `Long` | `integer` | `int64` | |\n| `float`, `Float` | `number` | `float` | |\n| `double`, `Double` | `number` | `double` | |\n| `boolean`, `Boolean` | `boolean` | - | |\n| `byte`, `Byte` | `string` | `byte` | |\n| `Date`, `LocalDate`, etc. | `string` | `date`, `date-time` | `format` 根据具体类型确定。 |\n| `BigDecimal` | `number` | - | |\n| `enum` | `string` | - | `enum` 的所有可选值会被提取并放入 `enumValues` 字段。 |\n| `Array`, `List`, `Set` | `array` | - | `items` 字段会递归解析集合的泛型类型。 |\n| `Map` | `object` | - | `additionalProperties` 字段会递归解析 Map 的 Value 类型。 |\n| POJO (自定义类) | `object` | - | `properties` 字段会包含类中所有（未被忽略的）字段的递归解析结果。 |\n| `org.springframework.web.multipart.MultipartFile` | `file` | - | 用于文件上传，通常在 `form-data` 请求体中使用。 |\n\n**字段属性来源**:\n\n*   **description**: 优先从 `@ApiModelProperty` (Swagger) 或 `@AmpDesc` 注解获取，其次是 JavaDoc 注释。\n*   **required**: 从 `@NotNull`, `@NotBlank`, `@ApiModelProperty(required=true)` 等校验注解中推断。\n*   **example**: 从 `@ApiModelProperty(example=...)` 或 `@AmpExample` 注解获取。\n*   **defaultValue**: 从 `@AmpDefaultValue` 注解获取。\n*   **validation**: `maxLength`, `minLength`, `maximum`, `minimum` 等校验规则从 JSR 303 注解（如 `@Size`, `@Max`, `@Min`）中解析。\n";
 }

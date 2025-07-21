@@ -69,23 +69,37 @@ HSF 接口的请求转换主要由 `RequestParser.parseRpcParameters` 和 `AmpDa
 
 ### 2.2. 响应 (Response) 转换
 
-响应转换由 `ResponseParser` 和 `AmpDataConvector.convertResponse` 处理。
+HSF 接口的响应转换主要由 `ResponseParser`, `KernelParser` 和 `AmpDataConvector` 处理。
 
 **核心规则**:
 
-1.  **返回类型解析**:
-    *   `ResponseParser` 解析方法的返回类型 (`PsiType`)。
-    *   它会自动“解包”常用的包装类，如 `java.util.concurrent.Future`, `reactor.core.publisher.Mono` 等，直接处理内部的实际业务对象。
-    *   `@ApiResponseClassName` 注解可以用于强制指定一个不同于方法签名的返回类型。
+1.  **返回类型解析与解包 (Return Type Resolution & Unwrapping)**:
+    *   `ResponseParser` 首先解析方法的返回类型 (`PsiType`)。
+    *   它会自动“解包”常用的包装类，如 `java.util.concurrent.Future`, `reactor.core.publisher.Mono` 等，以获取内部的实际业务对象类型。
+    *   `@ApiResponseClassName` 注解可以被用来强制指定一个不同于方法签名的返回类型，这在返回类型是泛型或接口时特别有用。
 
-2.  **结构体转换**:
-    *   `KernelParser` 会递归地将返回的 Java 类型（通常是 POJO）转换为一个 `Struct` 对象。
-    *   这个 `Struct` 对象包含了字段的类型、名称、描述等信息，形成了 API Schema 中的 `responses.200.schema` 部分。
+2.  **结构体转换 (Struct Conversion)**:
+    *   `KernelParser` 负责将解析出的 Java 类型（通常是一个 POJO）递归地转换为一个 `Struct` 对象。
+    *   这个转换过程遵循[第 4 节的通用数据类型转换规则](#4-通用数据类型转换规则)。
+    *   最终生成的 `Struct` 对象包含了字段的类型、名称、描述等详细信息，并被置于 API Schema 的 `responses.200.schema` 路径下。
 
-3.  **响应包装 (`Wrapper`)**:
-    *   系统支持对最终的响应 `Struct` 进行包装。例如，可以统一添加一个包含 `success`, `code`, `data` 等字段的外层结构。
-    *   这个包装逻辑由 `AmpDataConvector.wrapResponse` 实现，包装结构体在插件配置中定义。
-    *   `@ApiResponseWrapper` 注解可以为特定 API 指定一个预定义的包装器，或者使用 `__disable__` 来禁用默认包装。
+3.  **响应包装 (Response Wrapping)**:
+    *   系统支持对最终的响应 `Struct` 进行统一包装。例如，可以配置一个全局的包装器，为所有响应添加一个包含 `success`, `code`, `data` 等字段的外层结构。
+    *   这个包装逻辑由 `AmpDataConvector.wrapResponse` 实现，具体的包装结构在插件的配置中定义。
+    *   `@ApiResponseWrapper` 注解提供了更细粒度的控制，可以为特定的 API 指定一个预定义的包装器，或者通过 `__disable__` 值来禁用该 API 的默认包装。
+
+### 2.3. 名称转换 (`name` vs `backendName`)
+
+在将 Java 字段转换为 Schema 参数/属性时，名称处理是一个关键步骤。
+
+*   **`backendName`**: 在 Schema 的 `parameter.schema` 或 `struct.properties` 的 `Struct` 对象中，`backendName` 字段 **始终存储 Java 代码中原始的字段或参数名**。例如，Java 字段 `private String userAge;`，其对应的 `backendName` 就是 `userAge`。这是为了在反向生成或问题追溯时保留原始代码的引用。
+
+*   **`name`**: 这是最终暴露给 API 调用者的 **前端参数名**。它的生成规则如下：
+    1.  **注解优先**: 优先使用 `@JsonProperty` (Jackson)、`@AmpName` 或其他相关注解中指定的值。
+    2.  **命名策略转换**: 如果没有注解指定名称，系统会应用一个全局的命名转换策略（`NameConversionRuleEnum`），例如从驼峰式（`camelCase`）转换为下划线式（`snake_case`）。Java 字段 `userAge` 可能会被转换为 `user_age`。
+    3.  **默认值**: 如果没有配置转换策略，则 `name` 与 `backendName` 保持一致。
+
+这个分离确保了后端代码的命名规范可以独立于前端 API 的命名规范，提供了更大的灵活性。
 
 ---
 
