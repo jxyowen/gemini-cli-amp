@@ -364,6 +364,7 @@ export class ApiManagementTool extends BaseTool<ApiManagementToolParams, ToolRes
 
     // 从环境变量获取token并添加到headers中
     const ampToken = process.env.AMP_CLI_TOKEN;
+
     const headers = {
       ...options.headers,
       ...(ampToken && { 'amp_plugin_token': ampToken })
@@ -542,13 +543,21 @@ ${changeDescription}
       return debugApiData.data;
     }
 
-    const env = this.getEnvironment();
     const url = `${API_BASE_URL}/api/v2/idea_plugin/apis/${apiName}/debug`;
     const params = new URLSearchParams();
     
-    // 添加环境参数
-    params.append('env', env);
-    
+    const ampExeConfig = process.env.AMP_EXE_CONFIG;
+    const aoneIsolationTag = process.env.AONE_ISOLATION_TAG;
+
+    if (ampExeConfig) {
+      params.append('exeConfigUuid', ampExeConfig);
+    }
+
+    if (aoneIsolationTag) {
+      params.append('aoneIsolationTag', aoneIsolationTag);
+    }
+
+    // 添加环境参数    
     const response = await this.fetchWithTimeoutAndOptions(
       `${url}?${params.toString()}`,
       {
