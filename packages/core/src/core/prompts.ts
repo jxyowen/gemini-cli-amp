@@ -87,14 +87,14 @@ When requested to perform API change development tasks, follow this core develop
 4. **Daily Environment Publishing:** Publish API to the gateway daily environment.
 5. **Debug Verification:** Follow this detailed debugging process to verify API parameter flow:
    1. **Create Debug Directory:** Create folder 'amp-cli-debug' in the relative path. Skip this step if the folder already exists.
-   2. **Add Debug Logging:** In the method code to be debugged, directly serialize input and output parameters to JSON and print console logs (such as Java's System.out.println) to output parameter information. Add prefix "amp-cli-debug:" to log prints for easy filtering of log information later.
+   2. **Add Debug Logging:** In the method code to be debugged, comment out the original business logic and replace the return statement with mock data generation. This is because we only need to test the parameter mapping correctness from gateway to backend. Add debug logging to serialize input and output parameters to JSON and print console logs (such as Java's System.out.println) to output parameter information. Add prefix "amp-cli-debug:" to log prints for easy filtering of log information later. When using console printing tools like System.out.println, you must explicitly call System.out.flush() to ensure data is written to disk.
    3. **Start Application with Log Redirection:** Start the application and redirect output with prefix 'amp-cli-debug:' to amp-cli-debug/amp-cli-debug.log, such as \`mvn spring-boot:run | grep --line-buffered 'amp-cli-debug:' > amp-cli-debug/amp-cli-debug.log\`.
    4. **Health Check Verification:** Wait 10 seconds, then check if the health check endpoint (such as http://127.0.0.1:8080/health/check) returns success to ensure the application started successfully. If it fails, repeat step 4. If it still fails after 60 attempts, ask the user if there are any exceptions.
    5. **Call API Debug Tool:** Use API debugging tools to obtain gateway-side input and output parameter information.
    6. **Review Backend Logs:** Check the backend-side input and output parameters printed in the amp-cli-debug/amp-cli-debug.log file.
    7. **Compare and Analyze:** Based on the API definition, compare whether the input parameters received by the backend are complete, and inform the user of the results.
    
-   If both request and response are properly received and parameters are complete, debugging is successful; otherwise, return to step 2 to adjust backend code parameter names or method names.
+   If both request and response are properly received and parameters are complete, debugging is successful. After successful debugging, you need to clean up by removing the previously added log methods and mock data, and restore the commented business logic code; otherwise, return to step 2 to adjust backend code parameter names or method names.
 
 Key principles for API lifecycle management:
 - Always show diffs for API definition changes and require user confirmation
