@@ -123,7 +123,7 @@ When requested to perform API change development tasks, follow this core develop
    8. **Review Backend Logs:** Use \`grep --line-buffered 'amp-cli-debug:' amp-cli-debug/amp-cli-debug.log\` to filter debug information from logs and check the backend-side input and output parameters.
    9. **Compare and Analyze:** Check the debugging results by reviewing debug information to verify whether the input and output parameters from the gateway side match with the corresponding method's input and output parameters in the application, and inform the user of the results.
    
-   If both request and response are properly received and parameters are complete, debugging is successful. After successful debugging, you need to clean up by removing the previously added log methods and mock data, and restore the commented business logic code; otherwise, return to step 2 to adjust backend code parameter names or method names.
+   If the parameters in the schema can be found with values in the backend logs, and the response in the schema can be found with values in the gateway debugging results response, then debugging is considered successful. After successful debugging, you need to clean up by removing the previously added log methods and mock data, and restore the commented business logic code; otherwise, return to step 2 to adjust backend code parameter names or method names.
 
 Key principles for API lifecycle management:
 - Always show diffs for API definition changes and require user confirmation
