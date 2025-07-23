@@ -108,7 +108,7 @@ When requested to perform API change development tasks, follow this core develop
    1. **Create Debug Directory:** Create folder 'amp-cli-debug' in the relative path. Skip this step if the folder already exists.
    2. **Add Debug Logging:** In the method code to be debugged, comment out the original business logic and replace the return statement with mock data generation. This is because we only need to test the parameter mapping correctness from gateway to backend. Add debug logging to output parameter information for each input and output parameter of the method: for simple types (such as String, int, boolean, etc.), print the parameter value directly; for complex objects, serialize them to JSON format. Use console logging (such as Java's System.out.println) with prefix "amp-cli-debug:" for easy filtering of log information later. When using console printing tools like System.out.println, you must explicitly call System.out.flush() to ensure data is written to disk.
    3. **Start Application with Log Redirection:** Start the application and set up two output redirections: one redirect all output to amp-cli-debug/app.log for application startup information, and another redirect debug information using filter condition \`grep --line-buffered 'amp-cli-debug:'\` to amp-cli-debug/amp-cli-debug.log, such as \`mvn spring-boot:run 2>&1 | tee amp-cli-debug/app.log | grep --line-buffered 'amp-cli-debug:' > amp-cli-debug/amp-cli-debug.log &\`. 
-   4. **Check Application Startup Status:** Use tail to observe the application startup information to monitor whether the application starts successfully and identify the application port number. Check for successful startup indicators in the logs (such as "Started Application" or "Tomcat started on port"). If startup is successful, proceed to step 5. If startup fails, stop observing and adjust the code to fix the startup issues before retrying.
+   4. **Check Application Startup Status:** Use \`tail -n100\` multiple times to observe the application startup information to monitor whether the application starts successfully and identify the application port number. Check for successful startup indicators in the logs (such as "Started Application" or "Tomcat started on port"). If startup is successful, proceed to step 5. If startup fails, stop observing and adjust the code to fix the startup issues before retrying.
    5. **Health Check Verification:** Wait 10 seconds after confirming successful startup from logs, then check if the health check endpoint (such as http://127.0.0.1:8080/check_health) returns success to ensure the application is running properly. If it fails, repeat step 5. If it still fails after 60 attempts, ask the user if there are any exceptions. If you need to kill the application, first use commands like \`lsof -i :8080\` to query the process ID (PID) occupying the port, then use \`kill <PID>\` to terminate the process.
    6. **Call API Debug Tool:** Use API debugging tools to obtain gateway-side input and output parameter information.
    7. **Review Backend Logs:** Use \`grep --line-buffered 'amp-cli-debug:' amp-cli-debug/amp-cli-debug.log\` to filter debug information from logs and check the backend-side input and output parameters.
@@ -411,139 +411,72 @@ The structure MUST be as follows:
 export function getSchemaToCodeRules(): string {
 
   return `
-    # 从 AlibabaCloud API Schema 生成 Java 后端代码的规则分析
+  # Schema to Java Generation Rules
 
-本文档旨在提供一个从 AlibabaCloud API Gateway 标准 Schema 反向生成 Java 后端代码（包括 HSF/Dubbo 接口和 Spring Controller）的规则和指南。该分析基于 \`amp-idea-plugin\` 的转换逻辑，并将其反转。
-
-## 1. 核心识别与分发逻辑
+## 核心协议识别逻辑
 
 生成过程的起点是解析 API Schema，其中最关键的部分是 \`backendService\` 对象。该对象的 \`protocol\` 字段是决定生成何种 Java 代码的核心依据。
 
 *   **\`backendService.protocol\` = \`HSF\` 或 \`DUBBO\`**: 生成一个 Java **接口 (interface)**，遵循 RPC 开发模式。
 *   **\`backendService.protocol\` = \`HTTP\`**: 生成一个 Java **类 (class)**，并使用 Spring Web 注解（如 \`@RestController\`, \`@RequestMapping\` 等）来构建一个 Controller。
 
----
+## HSF/Dubbo生成逻辑
 
-## 2. 生成 HSF/Dubbo 服务接口
+### 整体生成逻辑概述
 
-当 \`backendService.protocol\` 为 \`HSF\` 或 \`DUBBO\` 时，目标是生成一个纯粹的 Java 接口。
+当 \`backendService.protocol\` 为 \`HSF\` 或 \`DUBBO\` 时，目标是生成一个纯粹的 Java 接口。接口的名称由 \`backendService.service\` 字段直接决定。例如，\`"service": "com.aliyun.amp.demo.api.DemoService"\` 将生成 \`public interface DemoService { ... }\`。
 
-### 2.1. 接口和方法签名
+### 方法名生成生成逻辑
 
-1.  **接口名称**: 由 \`backendService.service\` 字段直接决定。例如，\`"service": "com.aliyun.amp.demo.api.DemoService"\` 将生成 \`public interface DemoService { ... }\`。
+方法名称由 \`backendService.method\` 字段决定。
 
-2.  **方法名称**: 由 \`backendService.method\` 字段决定。
+从 Schema 生成 Java 代码时，\`backendName\` 字段是处理名称和结构映射的核心。其应用分为请求参数和响应返回类型两种场景。
 
-3.  **方法返回类型**: 通过解析 \`responses.200.schema\` 对象生成。生成器需要递归地将 Schema 中的 \`Struct\` 对象（包括其 \`type\`, \`format\`, \`properties\`, \`items\` 等）映射回 Java 类型（详见第 4 节的类型映射表）。
-    *   如果 Schema 结构暗示了某种包装（例如，包含 \`success\`, \`data\` 等字段），生成器可能会生成一个泛型的 \`Result<T>\` 类，其中 \`T\` 是业务数据的具体类型。
+#### 示例
 
-### 2.2. 响应 (Response) 转换
-
-**核心规则**:
-
-方法返回类型的生成主要依据是 API Schema 中的 \`responses.200.schema\` 对象。生成器的一个核心任务是识别并“解包”标准的响应包装结构，以便开发者可以直接处理核心业务对象，而不是外层的响应包装器。
-
-#### 2.2.1. 结构体 (POJO) 生成
-
-*   如果 \`schema\` 的 \`type\` 是 \`object\` 并且定义了 \`properties\`，系统会为其生成一个对应的 Java POJO 类。
-*   类名可以从 Schema 的 \`definitions\` 或 \`components\` 中引用 (\`$ref\`) 的名称推断得出。如果没有引用，可以根据上下文生成一个描述性的名称（例如，\`UpdateUserResponse\`）。
-
-#### 2.2.2. 基于 \`backendName\` 的响应解包 (Unwrapping)
-
-在处理响应时，\`backendName\` 字段扮演着至关重要的角色，它不仅指定了字段名，还揭示了后端返回数据时的嵌套结构。当 \`backendName\` 包含点（\`.\`）时，表示返回的业务数据需要从一个或多个包装对象中提取。这是实现响应解包的主要机制。
-
-**核心规则**:
-
-1.  **路径解析**: \`backendName\` 的值（如 \`data.result\`）被解析为一个路径。路径的每一部分都代表一个嵌套的 Java POJO 字段。
-2.  **POJO 结构生成**: 代码生成器需要根据这个路径创建相应的 POJO 结构。
-    *   对于 \`data.result\`，最外层的 POJO 会包含一个名为 \`data\` 的字段。
-    *   这个 \`data\` 字段的类型是另一个 POJO，该 POJO 内部包含一个名为 \`result\` 的字段。
-3.  **方法返回类型**: 最终生成的方法的返回类型，是路径最深处字段的类型。在 \`data.result\` 的例子中，方法的返回类型就是 \`result\` 字段对应的 Java 类型。
-
-**示例** (复杂对象返回):
-
-假设我们有以下 \`response\` schema 定义，其中返回的是一个复杂对象 \`UserInfo\`：
-
-*   **API Schema (response 部分)**:
+*   **API Schema (部分)**:
     \`\`\`json
-    "responses": {
-      "200": {
-        "schema": {
-          "type": "object",
-          "properties": {
-            "success": { "type": "boolean" },
-            "data": {
-              "type": "object",
-              "properties": {
-                "result": {
-                  "$ref": "#/components/schemas/UserInfo",
-                  "backendName": "data.result" // 关键字段
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "components": {
-      "schemas": {
-        "UserInfo": {
-          "type": "object",
-          "properties": {
-            "userId": { "type": "string" },
-            "userName": { "type": "string" }
-          }
-        }
+    {
+      "backendService": {
+        "protocol": "HSF",
+        "service": "com.aliyun.amp.demo.api.UserService",
+        "method": "getUserById"
       }
     }
     \`\`\`
-
-*   **生成逻辑分析**:
-    1.  \`backendName\` 是 \`data.result\`，路径深度为 2。
-    2.  生成器识别出需要一个包含 \`data\` 字段的外部响应 POJO。
-    3.  \`data\` 字段本身是另一个 POJO，它包含一个 \`result\` 字段。
-    4.  \`result\` 字段的 schema 是对 \`UserInfo\` 的引用 (\`$ref\`)。因此，它的 Java 类型是根据 \`UserInfo\` schema 生成的 \`UserInfo\` POJO。
-    5.  最终，生成的服务方法的返回类型应该是 \`UserInfo\`，而不是包含 \`data\` 和 \`result\` 的整个复杂对象。
 
 *   **生成的 Java 代码**:
-
-    代码生成器会首先为 \`UserInfo\` schema 创建一个对应的 POJO，然后生成“解包”后的方法签名：
-
     \`\`\`java
-    // 1. 根据 components/schemas/UserInfo 生成 POJO
-    public class UserInfo {
-        private String userId;
-        private String userName;
-        // getters and setters
-    }
-
-    // 2. 生成 HSF 接口
-    public interface DemoService {
-        // 返回类型被解包为最内层的 UserInfo 对象
-        UserInfo someMethod(...);
+    public interface UserService {
+        // 方法名 "getUserById" 直接来源于 "method" 字段
+        User getUserById(String userId);
     }
     \`\`\`
 
-    同时，为了在后台正确处理完整的响应，可能会在内部生成或依赖如下结构的 POJO（这些 POJO 对最终用户可能是透明的）：
+### 入参生成生成逻辑
 
-    \`\`\`java
-    // 内部处理可能依赖的结构
-    public class ApiResponse {
-        private boolean success;
-        private DataWrapper data;
-        // getters/setters
-    }
+**核心规则**:
 
-    public class DataWrapper {
-        private UserInfo result;
-        // getters/setters
-    }
-    \`\`\`
+1.  **参数重组依据**: \`parameter.schema\` 对象中的 \`groupIndex\` 和 \`index\` 字段是重组参数的关键。
+    *   \`index\`: 用于表示简单类型参数（如 \`String\`, \`int\` 等基本类型）在方法签名中的顺序（从1开始）。
+    *   \`groupIndex\`: 用于表示一个参数是 POJO 的一级字段，并且这个 \`groupIndex\` 代表了该 POJO 在方法参数中的顺序（从1开始）。所有具有相同 \`groupIndex\` 的 API 参数将被聚合到同一个 POJO 对象中。
 
-### 2.3. 请求参数 (Request) 生成
+2.  **参数类型来源**: \`backendService.paramTypes\` 数组提供了最准确的参数类型信息。它是一个包含了每个参数完全限定名的字符串列表。生成器应优先使用此列表来确定方法签名。
 
+3.  **生成逻辑**:
+    *   遍历 API Schema 中的 \`parameters\` 列表。
+    *   使用一个 Map，以 \`groupIndex\` 为键，将参数分组。
+    *   **对于有 \`groupIndex\` 的参数**: 这些参数属于一个 POJO。需要为这个 \`groupIndex\` 生成一个新的 Java 类，类名可以根据上下文推断（例如，使用 \`paramTypes\` 中对应的类名）。该 POJO 的字段由所有共享此 \`groupIndex\` 的 API 参数构成。
+    *   **对于没有 \`groupIndex\` 的参数**: 这些是方法的直接参数（如 \`String\`, \`int\` 等基本类型或简单对象）。
+    *   最终，根据 \`paramTypes\` 数组和解析出的参数，构建完整的方法签名。
 
-**示例**:
+在处理请求参数时，\`backendName\` 直接映射到 POJO 的字段名或方法的参数名。
+
+*   **Java 字段/参数名**: **始终以来源 Schema 中的 \`backendName\` 字段为准**。\`backendName\` 保存了原始的、未经转换的后端变量名，是生成代码时最可靠的依据。例如，在参数定义中，\`"backendName": "userAge"\` 将生成 \`private String userAge;\`。
+
+*   **前端参数名 (\`name\`) 的作用**: Schema 中的 \`name\` 字段（前端参数名）主要用于生成注解。如果 \`name\` 和 \`backendName\` 不一致（例如，\`name\` 是 \`user_age\`，而 \`backendName\` 是 \`userAge\`），则需要添加 \`@JsonProperty("user_age")\` 这样的注解来处理名称映射。这确保了 Java 代码遵循其自身的命名规范（如驼峰式），同时能正确接收来自前端的、不同命名规范的参数。
+
+#### 示例
 
 *   **API Schema (部分)**:
     \`\`\`json
@@ -576,43 +509,24 @@ export function getSchemaToCodeRules(): string {
         Result<Void> updateUser(String userId, UserDTO user);
     }
     \`\`\`
-    
+
+### 出参生成生成逻辑
+
 **核心规则**:
 
-1.  **参数重组依据**: \`parameter.schema\` 对象中的 \`groupIndex\` 和 \`index\` 字段是重组参数的关键。
-    *   \`index\`: 用于表示简单类型参数（如 \`String\`, \`int\` 等基本类型）在方法签名中的顺序（从1开始）。
-    *   \`groupIndex\`: 用于表示一个参数是 POJO 的一级字段，并且这个 \`groupIndex\` 代表了该 POJO 在方法参数中的顺序（从1开始）。所有具有相同 \`groupIndex\` 的 API 参数将被聚合到同一个 POJO 对象中。
-
-2.  **参数类型来源**: \`backendService.paramTypes\` 数组提供了最准确的参数类型信息。它是一个包含了每个参数完全限定名的字符串列表。生成器应优先使用此列表来确定方法签名。
-
-3.  **生成逻辑**:
-    *   遍历 API Schema 中的 \`parameters\` 列表。
-    *   使用一个 Map，以 \`groupIndex\` 为键，将参数分组。
-    *   **对于有 \`groupIndex\` 的参数**: 这些参数属于一个 POJO。需要为这个 \`groupIndex\` 生成一个新的 Java 类，类名可以根据上下文推断（例如，使用 \`paramTypes\` 中对应的类名）。该 POJO 的字段由所有共享此 \`groupIndex\` 的 API 参数构成。
-    *   **对于没有 \`groupIndex\` 的参数**: 这些是方法的直接参数（如 \`String\`, \`int\` 等基本类型或简单对象）。
-    *   最终，根据 \`paramTypes\` 数组和解析出的参数，构建完整的方法签名。
-
-### 2.4. 名称生成 (\`backendName\` -> Java 字段/返回类型)
-
-从 Schema 生成 Java 代码时，\`backendName\` 字段是处理名称和结构映射的核心。其应用分为请求参数和响应返回类型两种场景。
-
-#### 2.4.1. 请求参数 (\`parameters\`)
-
-在处理请求参数时，\`backendName\` 直接映射到 POJO 的字段名或方法的参数名。
-
-*   **Java 字段/参数名**: **始终以来源 Schema 中的 \`backendName\` 字段为准**。\`backendName\` 保存了原始的、未经转换的后端变量名，是生成代码时最可靠的依据。例如，在参数定义中，\`"backendName": "userAge"\` 将生成 \`private String userAge;\`。
-
-*   **前端参数名 (\`name\`) 的作用**: Schema 中的 \`name\` 字段（前端参数名）主要用于生成注解。如果 \`name\` 和 \`backendName\` 不一致（例如，\`name\` 是 \`user_age\`，而 \`backendName\` 是 \`userAge\`），则需要添加 \`@JsonProperty("user_age")\` 这样的注解来处理名称映射。这确保了 Java 代码遵循其自身的命名规范（如驼峰式），同时能正确接收来自前端的、不同命名规范的参数。
-
-*   **参数注解**: 对于 Controller，\`@PathVariable("id")\`, \`@RequestParam("version")\` 等注解的值，应该使用 Schema 参数中的 \`name\` 字段。
-
-#### 2.4.2. 响应返回类型 (\`responses\`)
+方法返回类型的生成主要依据是 API Schema 中的 \`responses.200.schema\` 对象。生成器的一个核心任务是识别并“解包”标准的响应包装结构，以便开发者可以直接处理核心业务对象，而不是外层的响应包装器。
 
 在处理响应时，\`backendName\` 不仅定义了字段名，还可能定义了需要“解包”的嵌套路径。当 \`backendName\` 包含点（如 \`data.result\`）时，它定义了从响应体中提取目标返回值的路径。
 
-**示例** (复杂对象返回):
+**核心规则**:
 
-假设我们有以下 \`response\` schema 定义，其中返回的是一个复杂对象 \`UserInfo\`：
+1.  **路径解析**: \`backendName\` 的值（如 \`data.result\`）被解析为一个路径。路径的每一部分都代表一个嵌套的 Java POJO 字段。
+2.  **POJO 结构生成**: 代码生成器需要根据这个路径创建相应的 POJO 结构。
+    *   对于 \`data.result\`，最外层的 POJO 会包含一个名为 \`data\` 的字段。
+    *   这个 \`data\` 字段的类型是另一个 POJO，该 POJO 内部包含一个名为 \`result\` 的字段。
+3.  **方法返回类型**: 最终生成的方法的返回类型，是路径最深处字段的类型。在 \`data.result\` 的例子中，方法的返回类型就是 \`result\` 字段对应的 Java 类型。
+
+#### 示例
 
 *   **API Schema (response 部分)**:
     \`\`\`json
@@ -668,14 +582,11 @@ export function getSchemaToCodeRules(): string {
         }
         \`\`\`
 
+## Controller生成逻辑
 
----
-
-## 3. 生成 Spring Controller
+### 整体生成逻辑概述
 
 当 \`backendService.protocol\` 为 \`HTTP\` 时，目标是生成一个带有 Spring Web 注解的 Java Controller 类。
-
-### 3.1. 类和方法注解
 
 1.  **类注解**: 生成的类应标记为 \`@RestController\`。
     *   可以从 API 的 \`path\` 中提取公共前缀作为类级别的 \`@RequestMapping\`。例如，如果 \`path\` 是 \`/api/v1/users/{id}\`，则类注解可以是 \`@RequestMapping("/api/v1/users")\`。
@@ -685,20 +596,42 @@ export function getSchemaToCodeRules(): string {
     *   \`method: "post"\` 对应 \`@PostMapping\`。
     *   注解的值是 \`path\` 中剩余的部分。例如，对于 \`/api/v1/users/{id}\`，方法注解是 \`@GetMapping("/{id}")\`。
 
-### 3.2. 方法签名和参数
+### 方法名生成生成逻辑
 
-1.  **方法名称**: Schema 中没有直接提供方法名。可以根据 HTTP 方法和路径生成一个描述性的名称，例如 \`getUserById\` 或 \`createUser\`。
+Schema 中没有直接提供方法名。可以根据 HTTP 方法和路径生成一个描述性的名称，例如 \`getUserById\` 或 \`createUser\`。
 
-2.  **返回类型**: 与 HSF 规则相同，通过解析 \`responses.200.schema\` 生成。对于 Spring，可以考虑生成 \`ResponseEntity<T>\` 来提供更灵活的 HTTP 响应控制。
+#### 示例
 
-3.  **方法参数**: 由 \`parameters\` 列表决定，主要依据是每个参数的 \`in\` 字段。
-    *   \`in: "path"\` -> 生成带 \`@PathVariable\` 的参数。
-    *   \`in: "query"\` -> 生成带 \`@RequestParam\` 的参数。
-    *   \`in: "header"\` -> 生成带 \`@RequestHeader\` 的参数。
-    *   \`in: "body"\` -> 生成带 \`@RequestBody\` 的参数。该参数的类型是一个需要根据其 \`schema\` 定义生成的 POJO。
-    *   \`in: "formData"\` -> 如果是文件上传 (\`type: "file"\`)，则生成 \`MultipartFile\` 类型的参数。否则，生成带 \`@RequestParam\` 的参数。
+*   **API Schema (部分)**:
+    \`\`\`json
+    {
+      "path": "/users/{id}",
+      "method": "get"
+    }
+    \`\`\`
 
-**示例**:
+*   **生成的 Java 代码**:
+    \`\`\`java
+    @GetMapping("/{id}")
+    // 方法名 "getUserById" 是根据 "get" 和 "/users/{id}" 生成的
+    public User getUserById(@PathVariable String id) {
+        // ...
+    }
+    \`\`\`
+
+### 入参生成生成逻辑
+
+方法参数由 \`parameters\` 列表决定，主要依据是每个参数的 \`in\` 字段。
+
+*   \`in: "path"\` -> 生成带 \`@PathVariable\` 的参数。
+*   \`in: "query"\` -> 生成带 \`@RequestParam\` 的参数。
+*   \`in: "header"\` -> 生成带 \`@RequestHeader\` 的参数。
+*   \`in: "body"\` -> 生成带 \`@RequestBody\` 的参数。该参数的类型是一个需要根据其 \`schema\` 定义生成的 POJO。
+*   \`in: "formData"\` -> 如果是文件上传 (\`type: "file"\`)，则生成 \`MultipartFile\` 类型的参数。否则，生成带 \`@RequestParam\` 的参数。
+
+*   **参数注解**: 对于 Controller，\`@PathVariable("id")\`, \`@RequestParam("version")\` 等注解的值，应该使用 Schema 参数中的 \`name\` 字段。
+
+#### 示例
 
 *   **API Schema (部分)**:
     \`\`\`json
@@ -730,9 +663,36 @@ export function getSchemaToCodeRules(): string {
     }
     \`\`\`
 
----
+### 出参生成生成逻辑
 
-## 4. 通用数据类型映射规则 (Schema 到 Java)
+与 HSF 规则相同，通过解析 \`responses.200.schema\` 生成。对于 Spring，可以考虑生成 \`ResponseEntity<T>\` 来提供更灵活的 HTTP 响应控制。
+
+#### 示例
+
+*   **API Schema (部分)**:
+    \`\`\`json
+    {
+      "responses": {
+        "200": {
+          "description": "OK",
+          "schema": {
+            "$ref": "#/components/schemas/User"
+          }
+        }
+      }
+    }
+    \`\`\`
+
+*   **生成的 Java 代码**:
+    \`\`\`java
+    public ResponseEntity<User> getUserById(@PathVariable String id) {
+        // ...
+        User user = // ... find user by id
+        return ResponseEntity.ok(user);
+    }
+    \`\`\`
+
+## 参数类型转换映射规则
 
 无论是生成 HSF 接口还是 Controller，将 Schema 类型映射到 Java 类型的规则是通用的。
 
@@ -750,7 +710,6 @@ export function getSchemaToCodeRules(): string {
 | \`array\` | (无) | \`java.util.List<T>\` | \`T\` 是通过递归解析 \`items\` 字段的 Schema 生成的类型。 |
 | \`object\` | (无) | \`java.util.Map<String, V>\` 或 **POJO** | 如果存在 \`properties\`，则生成一个 POJO 类。如果存在 \`additionalProperties\`，则生成一个 Map，其中 \`V\` 是递归解析 \`additionalProperties\` 的 Schema 生成的类型。 |
 | \`file\` | (无) | \`org.springframework.web.multipart.MultipartFile\` | 仅适用于 HTTP \`formData\` 请求。 |
-
   `.trim();
 
 }
