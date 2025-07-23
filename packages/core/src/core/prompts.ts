@@ -106,12 +106,13 @@ When requested to perform API change development tasks, follow this core develop
 4. **Daily Environment Publishing:** Publish API to the gateway daily environment.
 5. **Debug Verification:** Follow this detailed debugging process to verify API parameter flow:
    1. **Create Debug Directory:** Create folder 'amp-cli-debug' in the relative path. Skip this step if the folder already exists.
-   2. **Add Debug Logging:** In the method code to be debugged, comment out the original business logic and replace the return statement with mock data generation. This is because we only need to test the parameter mapping correctness from gateway to backend. Add debug logging to serialize input and output parameters to JSON and print console logs (such as Java's System.out.println) to output parameter information. Add prefix "amp-cli-debug:" to log prints for easy filtering of log information later. When using console printing tools like System.out.println, you must explicitly call System.out.flush() to ensure data is written to disk.
-   3. **Start Application with Log Redirection:** Start the application and set up two output redirections: one redirect all output to amp-cli-debug/app.log for application startup information, and another redirect debug information using filter condition \`grep --line-buffered 'amp-cli-debug:'\` to amp-cli-debug/amp-cli-debug.log, such as \`mvn spring-boot:run 2>&1 | tee amp-cli-debug/app.log | grep --line-buffered 'amp-cli-debug:' > amp-cli-debug/amp-cli-debug.log &\`. Use tail to observe the application startup information to monitor whether the application starts successfully and identify the application port number. Stop observing after successful startup, or adjust the code if startup fails.
-   4. **Health Check Verification:** Wait 10 seconds, then check if the health check endpoint (such as http://127.0.0.1:8080/health/check) returns success to ensure the application started successfully. If it fails, repeat step 4. If it still fails after 60 attempts, ask the user if there are any exceptions. If you need to kill the application, first use commands like \`lsof -i :8080\` to query the process ID (PID) occupying the port, then use \`kill <PID>\` to terminate the process.
-   5. **Call API Debug Tool:** Use API debugging tools to obtain gateway-side input and output parameter information.
-   6. **Review Backend Logs:** Use \`grep --line-buffered 'amp-cli-debug:' amp-cli-debug/amp-cli-debug.log\` to filter debug information from logs and check the backend-side input and output parameters.
-   7. **Compare and Analyze:** Check the debugging results by reviewing debug information to verify whether the input and output parameters from the gateway side match with the corresponding method's input and output parameters in the application, and inform the user of the results.
+   2. **Add Debug Logging:** In the method code to be debugged, comment out the original business logic and replace the return statement with mock data generation. This is because we only need to test the parameter mapping correctness from gateway to backend. Add debug logging to output parameter information for each input and output parameter of the method: for simple types (such as String, int, boolean, etc.), print the parameter value directly; for complex objects, serialize them to JSON format. Use console logging (such as Java's System.out.println) with prefix "amp-cli-debug:" for easy filtering of log information later. When using console printing tools like System.out.println, you must explicitly call System.out.flush() to ensure data is written to disk.
+   3. **Start Application with Log Redirection:** Start the application and set up two output redirections: one redirect all output to amp-cli-debug/app.log for application startup information, and another redirect debug information using filter condition \`grep --line-buffered 'amp-cli-debug:'\` to amp-cli-debug/amp-cli-debug.log, such as \`mvn spring-boot:run 2>&1 | tee amp-cli-debug/app.log | grep --line-buffered 'amp-cli-debug:' > amp-cli-debug/amp-cli-debug.log &\`. 
+   4. **Check Application Startup Status:** Use tail to observe the application startup information to monitor whether the application starts successfully and identify the application port number. Check for successful startup indicators in the logs (such as "Started Application" or "Tomcat started on port"). If startup is successful, proceed to step 5. If startup fails, stop observing and adjust the code to fix the startup issues before retrying.
+   5. **Health Check Verification:** Wait 10 seconds after confirming successful startup from logs, then check if the health check endpoint (such as http://127.0.0.1:8080/check_health) returns success to ensure the application is running properly. If it fails, repeat step 5. If it still fails after 60 attempts, ask the user if there are any exceptions. If you need to kill the application, first use commands like \`lsof -i :8080\` to query the process ID (PID) occupying the port, then use \`kill <PID>\` to terminate the process.
+   6. **Call API Debug Tool:** Use API debugging tools to obtain gateway-side input and output parameter information.
+   7. **Review Backend Logs:** Use \`grep --line-buffered 'amp-cli-debug:' amp-cli-debug/amp-cli-debug.log\` to filter debug information from logs and check the backend-side input and output parameters.
+   8. **Compare and Analyze:** Check the debugging results by reviewing debug information to verify whether the input and output parameters from the gateway side match with the corresponding method's input and output parameters in the application, and inform the user of the results.
    
    If both request and response are properly received and parameters are complete, debugging is successful. After successful debugging, you need to clean up by removing the previously added log methods and mock data, and restore the commented business logic code; otherwise, return to step 2 to adjust backend code parameter names or method names.
 
@@ -440,45 +441,107 @@ export function getSchemaToCodeRules(): string {
 
 **核心规则**:
 
-1.  **返回类型解析**:
-    *   方法返回类型的生成主要依据是 API Schema 中的 \`responses.200.schema\` 对象。
-    *   生成器会递归地将 \`schema\` 对象（包括其 \`type\`, \`format\`, \`properties\`, \`items\` 等）映射回 Java 类型，具体映射规则见第 4 节。
+方法返回类型的生成主要依据是 API Schema 中的 \`responses.200.schema\` 对象。生成器的一个核心任务是识别并“解包”标准的响应包装结构，以便开发者可以直接处理核心业务对象，而不是外层的响应包装器。
 
-2.  **结构体 (POJO) 生成**:
-    *   如果 \`schema\` 的 \`type\` 是 \`object\` 并且定义了 \`properties\`，系统会为其生成一个对应的 Java POJO 类。
-    *   类名可以从 Schema 的 \`definitions\` 或 \`components\` 中引用 (\`$ref\`) 的名称推断得出。如果没有引用，可以根据上下文生成一个描述性的名称（例如，\`UpdateUserResponse\`）。
+#### 2.2.1. 结构体 (POJO) 生成
 
-3.  **响应解包 (Unwrapping)**:
-    *   代码生成器可以被设计为识别并“解包”标准的响应包装结构。例如，一个常见的包装器可能包含 \`success\` (boolean), \`code\` (string/integer), 和 \`data\` (object) 字段。
-    *   如果识别出这种模式，生成器可以选择性地生成一个泛型的 \`Result<T>\` 类，并将方法的返回类型定义为 \`Result<T>\`，其中 \`T\` 是从 \`data\` 字段的 \`schema\` 递归生成的 Java 类型。
-    *   这种解包逻辑使得生成的业务代码可以直接处理核心业务对象 \`T\`，而不是外层的响应包装。
+*   如果 \`schema\` 的 \`type\` 是 \`object\` 并且定义了 \`properties\`，系统会为其生成一个对应的 Java POJO 类。
+*   类名可以从 Schema 的 \`definitions\` 或 \`components\` 中引用 (\`$ref\`) 的名称推断得出。如果没有引用，可以根据上下文生成一个描述性的名称（例如，\`UpdateUserResponse\`）。
 
-### 2.3. 请求参数 (Request) 生成
+#### 2.2.2. 基于 \`backendName\` 的响应解包 (Unwrapping)
+
+在处理响应时，\`backendName\` 字段扮演着至关重要的角色，它不仅指定了字段名，还揭示了后端返回数据时的嵌套结构。当 \`backendName\` 包含点（\`.\`）时，表示返回的业务数据需要从一个或多个包装对象中提取。这是实现响应解包的主要机制。
 
 **核心规则**:
 
-1.  **参数重组依据**: \`parameter.schema\` 对象中的 \`groupIndex\` 和 \`index\` 字段是重组参数的关键。
-    *   \`index\`: 用于表示简单类型参数（如 \`String\`, \`int\` 等基本类型）在方法签名中的顺序（从1开始）。
-    *   \`groupIndex\`: 用于表示一个参数是 POJO 的一级字段，并且这个 \`groupIndex\` 代表了该 POJO 在方法参数中的顺序（从1开始）。所有具有相同 \`groupIndex\` 的 API 参数将被聚合到同一个 POJO 对象中。
+1.  **路径解析**: \`backendName\` 的值（如 \`data.result\`）被解析为一个路径。路径的每一部分都代表一个嵌套的 Java POJO 字段。
+2.  **POJO 结构生成**: 代码生成器需要根据这个路径创建相应的 POJO 结构。
+    *   对于 \`data.result\`，最外层的 POJO 会包含一个名为 \`data\` 的字段。
+    *   这个 \`data\` 字段的类型是另一个 POJO，该 POJO 内部包含一个名为 \`result\` 的字段。
+3.  **方法返回类型**: 最终生成的方法的返回类型，是路径最深处字段的类型。在 \`data.result\` 的例子中，方法的返回类型就是 \`result\` 字段对应的 Java 类型。
 
-2.  **参数类型来源**: \`backendService.paramTypes\` 数组提供了最准确的参数类型信息。它是一个包含了每个参数完全限定名的字符串列表。生成器应优先使用此列表来确定方法签名。
+**示例** (复杂对象返回):
 
-3.  **生成逻辑**:
-    *   遍历 API Schema 中的 \`parameters\` 列表。
-    *   使用一个 Map，以 \`groupIndex\` 为键，将参数分组。
-    *   **对于有 \`groupIndex\` 的参数**: 这些参数属于一个 POJO。需要为这个 \`groupIndex\` 生成一个新的 Java 类，类名可以根据上下文推断（例如，使用 \`paramTypes\` 中对应的类名）。该 POJO 的字段由所有共享此 \`groupIndex\` 的 API 参数构成。
-    *   **对于没有 \`groupIndex\` 的参数**: 这些是方法的直接参数（如 \`String\`, \`int\` 等基本类型或简单对象）。
-    *   最终，根据 \`paramTypes\` 数组和解析出的参数，构建完整的方法签名。
+假设我们有以下 \`response\` schema 定义，其中返回的是一个复杂对象 \`UserInfo\`：
 
-### 2.4. 名称生成 (\`backendName\` -> Java 字段)
+*   **API Schema (response 部分)**:
+    \`\`\`json
+    "responses": {
+      "200": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "success": { "type": "boolean" },
+            "data": {
+              "type": "object",
+              "properties": {
+                "result": {
+                  "$ref": "#/components/schemas/UserInfo",
+                  "backendName": "data.result" // 关键字段
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "components": {
+      "schemas": {
+        "UserInfo": {
+          "type": "object",
+          "properties": {
+            "userId": { "type": "string" },
+            "userName": { "type": "string" }
+          }
+        }
+      }
+    }
+    \`\`\`
 
-从 Schema 生成 Java 字段时，名称的处理规则如下：
+*   **生成逻辑分析**:
+    1.  \`backendName\` 是 \`data.result\`，路径深度为 2。
+    2.  生成器识别出需要一个包含 \`data\` 字段的外部响应 POJO。
+    3.  \`data\` 字段本身是另一个 POJO，它包含一个 \`result\` 字段。
+    4.  \`result\` 字段的 schema 是对 \`UserInfo\` 的引用 (\`$ref\`)。因此，它的 Java 类型是根据 \`UserInfo\` schema 生成的 \`UserInfo\` POJO。
+    5.  最终，生成的服务方法的返回类型应该是 \`UserInfo\`，而不是包含 \`data\` 和 \`result\` 的整个复杂对象。
 
-*   **Java 字段/参数名**: **始终以来源 Schema 中的 \`backendName\` 字段为准**。\`backendName\` 保存了原始的、未经转换的后端变量名，是生成代码时最可靠的依据。例如，\`"backendName": "userAge"\` 将生成 \`private String userAge;\`。
+*   **生成的 Java 代码**:
 
-*   **前端参数名 (\`name\`) 的作用**: Schema 中的 \`name\` 字段（前端参数名）主要用于生成注解。如果 \`name\` 和 \`backendName\` 不一致（例如，\`name\` 是 \`user_age\`，而 \`backendName\` 是 \`userAge\`），则需要添加 \`@JsonProperty("user_age")\` 这样的注解来处理名称映射。这确保了 Java 代码遵循其自身的命名规范（如驼峰式），同时能正确接收来自前端的、不同命名规范的参数。
+    代码生成器会首先为 \`UserInfo\` schema 创建一个对应的 POJO，然后生成“解包”后的方法签名：
 
-*   **参数注解**: 对于 Controller，\`@PathVariable("id")\`, \`@RequestParam("version")\` 等注解的值，应该使用 Schema 参数中的 \`name\` 字段。
+    \`\`\`java
+    // 1. 根据 components/schemas/UserInfo 生成 POJO
+    public class UserInfo {
+        private String userId;
+        private String userName;
+        // getters and setters
+    }
+
+    // 2. 生成 HSF 接口
+    public interface DemoService {
+        // 返回类型被解包为最内层的 UserInfo 对象
+        UserInfo someMethod(...);
+    }
+    \`\`\`
+
+    同时，为了在后台正确处理完整的响应，可能会在内部生成或依赖如下结构的 POJO（这些 POJO 对最终用户可能是透明的）：
+
+    \`\`\`java
+    // 内部处理可能依赖的结构
+    public class ApiResponse {
+        private boolean success;
+        private DataWrapper data;
+        // getters/setters
+    }
+
+    public class DataWrapper {
+        private UserInfo result;
+        // getters/setters
+    }
+    \`\`\`
+
+### 2.3. 请求参数 (Request) 生成
+
 
 **示例**:
 
@@ -513,6 +576,98 @@ export function getSchemaToCodeRules(): string {
         Result<Void> updateUser(String userId, UserDTO user);
     }
     \`\`\`
+    
+**核心规则**:
+
+1.  **参数重组依据**: \`parameter.schema\` 对象中的 \`groupIndex\` 和 \`index\` 字段是重组参数的关键。
+    *   \`index\`: 用于表示简单类型参数（如 \`String\`, \`int\` 等基本类型）在方法签名中的顺序（从1开始）。
+    *   \`groupIndex\`: 用于表示一个参数是 POJO 的一级字段，并且这个 \`groupIndex\` 代表了该 POJO 在方法参数中的顺序（从1开始）。所有具有相同 \`groupIndex\` 的 API 参数将被聚合到同一个 POJO 对象中。
+
+2.  **参数类型来源**: \`backendService.paramTypes\` 数组提供了最准确的参数类型信息。它是一个包含了每个参数完全限定名的字符串列表。生成器应优先使用此列表来确定方法签名。
+
+3.  **生成逻辑**:
+    *   遍历 API Schema 中的 \`parameters\` 列表。
+    *   使用一个 Map，以 \`groupIndex\` 为键，将参数分组。
+    *   **对于有 \`groupIndex\` 的参数**: 这些参数属于一个 POJO。需要为这个 \`groupIndex\` 生成一个新的 Java 类，类名可以根据上下文推断（例如，使用 \`paramTypes\` 中对应的类名）。该 POJO 的字段由所有共享此 \`groupIndex\` 的 API 参数构成。
+    *   **对于没有 \`groupIndex\` 的参数**: 这些是方法的直接参数（如 \`String\`, \`int\` 等基本类型或简单对象）。
+    *   最终，根据 \`paramTypes\` 数组和解析出的参数，构建完整的方法签名。
+
+### 2.4. 名称生成 (\`backendName\` -> Java 字段/返回类型)
+
+从 Schema 生成 Java 代码时，\`backendName\` 字段是处理名称和结构映射的核心。其应用分为请求参数和响应返回类型两种场景。
+
+#### 2.4.1. 请求参数 (\`parameters\`)
+
+在处理请求参数时，\`backendName\` 直接映射到 POJO 的字段名或方法的参数名。
+
+*   **Java 字段/参数名**: **始终以来源 Schema 中的 \`backendName\` 字段为准**。\`backendName\` 保存了原始的、未经转换的后端变量名，是生成代码时最可靠的依据。例如，在参数定义中，\`"backendName": "userAge"\` 将生成 \`private String userAge;\`。
+
+*   **前端参数名 (\`name\`) 的作用**: Schema 中的 \`name\` 字段（前端参数名）主要用于生成注解。如果 \`name\` 和 \`backendName\` 不一致（例如，\`name\` 是 \`user_age\`，而 \`backendName\` 是 \`userAge\`），则需要添加 \`@JsonProperty("user_age")\` 这样的注解来处理名称映射。这确保了 Java 代码遵循其自身的命名规范（如驼峰式），同时能正确接收来自前端的、不同命名规范的参数。
+
+*   **参数注解**: 对于 Controller，\`@PathVariable("id")\`, \`@RequestParam("version")\` 等注解的值，应该使用 Schema 参数中的 \`name\` 字段。
+
+#### 2.4.2. 响应返回类型 (\`responses\`)
+
+在处理响应时，\`backendName\` 不仅定义了字段名，还可能定义了需要“解包”的嵌套路径。当 \`backendName\` 包含点（如 \`data.result\`）时，它定义了从响应体中提取目标返回值的路径。
+
+**示例** (复杂对象返回):
+
+假设我们有以下 \`response\` schema 定义，其中返回的是一个复杂对象 \`UserInfo\`：
+
+*   **API Schema (response 部分)**:
+    \`\`\`json
+    "responses": {
+      "200": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "success": { "type": "boolean" },
+            "data": {
+              "type": "object",
+              "properties": {
+                "result": {
+                  "$ref": "#/components/schemas/UserInfo",
+                  "backendName": "data.result" // 关键字段
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "components": {
+      "schemas": {
+        "UserInfo": {
+          "type": "object",
+          "properties": {
+            "userId": { "type": "string" },
+            "userName": { "type": "string" }
+          }
+        }
+      }
+    }
+    \`\`\`
+
+*   **生成逻辑与代码**:
+
+    1.  **路径解析**: 生成器识别出 \`backendName\` 为 \`data.result\`，因此需要解包。
+    2.  **目标 Schema 定位**: 解包路径的终点是 \`result\` 字段，其 schema 引用了 \`#/components/schemas/UserInfo\`。
+    3.  **POJO 生成**: 根据 \`UserInfo\` 的 schema，生成对应的 \`UserInfo.java\` 类。
+        \`\`\`java
+        public class UserInfo {
+            private String userId;
+            private String userName;
+            // getters and setters
+        }
+        \`\`\`
+    4.  **方法签名生成**: 最终，服务方法的返回类型被确定为解包后的目标类型 \`UserInfo\`。
+        \`\`\`java
+        public interface DemoService {
+            // 返回类型被解包为最内层的 UserInfo 对象
+            UserInfo someMethod(...);
+        }
+        \`\`\`
+
 
 ---
 
@@ -595,6 +750,7 @@ export function getSchemaToCodeRules(): string {
 | \`array\` | (无) | \`java.util.List<T>\` | \`T\` 是通过递归解析 \`items\` 字段的 Schema 生成的类型。 |
 | \`object\` | (无) | \`java.util.Map<String, V>\` 或 **POJO** | 如果存在 \`properties\`，则生成一个 POJO 类。如果存在 \`additionalProperties\`，则生成一个 Map，其中 \`V\` 是递归解析 \`additionalProperties\` 的 Schema 生成的类型。 |
 | \`file\` | (无) | \`org.springframework.web.multipart.MultipartFile\` | 仅适用于 HTTP \`formData\` 请求。 |
+
   `.trim();
 
 }
