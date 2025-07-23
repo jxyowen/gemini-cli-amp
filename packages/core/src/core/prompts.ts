@@ -104,7 +104,7 @@ When requested to perform API change development tasks, follow this core develop
 2. **Backend Code Generation:** Based on API parameter mapping (backendName and backendService.service, backendService.method, and backendService.paramTypes and backendService.url), generate backend code with clearly specified file paths.
 3. **Debug Verification:** Follow this detailed debugging process to verify API parameter flow:
    1. **Create Debug Directory:** Create folder 'amp-cli-debug' in the relative path. Skip this step if the folder already exists.
-   2. **Add Debug Logging:** In the method code to be debugged, comment out the original business logic and replace the return statement with mock data generation. This is because we only need to test the parameter mapping correctness from gateway to backend. Add debug logging to output parameter information for each input and output parameter of the method: for simple types (such as String, int, boolean, etc.), print the parameter value directly; for complex objects, serialize them to JSON format. Use console logging (such as Java's System.out.println) with prefix "amp-cli-debug:" for easy filtering of log information later. When using console printing tools like System.out.println, you must explicitly call System.out.flush() to ensure data is written to disk.
+   2. **Add Debug Logging:** In the method code to be debugged, comment out the original business logic and replace the return statement with mock data generation. This is because we only need to test the parameter mapping correctness from gateway to backend. Add debug logging to output parameter information for each input and output parameter of the method: for simple types (such as String, int, boolean, etc.), print the parameter value in k=v format (e.g., "paramName=paramValue"); for complex objects, output both k=v format for key fields and complete JSON serialization using the project's existing JSON tools (preferably Jackson's ObjectMapper for Java projects). Use console logging (such as Java's System.out.println) with prefix "amp-cli-debug:" for easy filtering of log information later. When using console printing tools like System.out.println, you must explicitly call System.out.flush() to ensure data is written to disk.
    3. **Start Application with Log Redirection:** Start the application and set up two output redirections: one redirect all output to amp-cli-debug/app.log for application startup information, and another redirect debug information using filter condition \`grep --line-buffered 'amp-cli-debug:'\` to amp-cli-debug/amp-cli-debug.log, such as \`mvn spring-boot:run 2>&1 | tee amp-cli-debug/app.log | grep --line-buffered 'amp-cli-debug:' > amp-cli-debug/amp-cli-debug.log &\`. 
    4. **Check Application Startup Status:** Use \`tail -n100\` multiple times to observe the application startup information to monitor whether the application starts successfully and identify the application port number. Check for successful startup indicators in the logs (such as "Started Application" or "Tomcat started on port"). If startup is successful, proceed to step 5. If startup fails, stop observing and adjust the code to fix the startup issues before retrying.
    5. **Health Check Verification:** Wait 10 seconds after confirming successful startup from logs, then check if the health check endpoint (such as http://127.0.0.1:8080/check_health) returns success to ensure the application is running properly. If it fails, repeat step 5. If it still fails after 60 attempts, ask the user if there are any exceptions. If you need to kill the application, first use commands like \`lsof -i :8080\` to query the process ID (PID) occupying the port, then use \`kill <PID>\` to terminate the process.
@@ -409,6 +409,7 @@ The structure MUST be as follows:
 export function getSchemaToCodeRules(): string {
 
   return `
+  
   # Schema to Java Generation Rules
 
 ## 核心协议识别逻辑
@@ -512,17 +513,14 @@ export function getSchemaToCodeRules(): string {
 
 **核心规则**:
 
-方法返回类型的生成主要依据是 API Schema 中的 \`responses.200.schema\` 对象。生成器的一个核心任务是识别并“解包”标准的响应包装结构，以便开发者可以直接处理核心业务对象，而不是外层的响应包装器。
+方法返回类型的生成主要依据是 API Schema 中的 \`responses.200.schema\` 对象。当 \`backendName\` 包含点（如 \`data.result\`）时，这表示一个嵌套的对象结构。代码生成器需要忠实地根据此结构创建所有对应的 Java POJO，而不是“解包”或简化它。
 
-在处理响应时，\`backendName\` 不仅定义了字段名，还可能定义了需要“解包”的嵌套路径。当 \`backendName\` 包含点（如 \`data.result\`）时，它定义了从响应体中提取目标返回值的路径。
+1.  **结构生成**: \`backendName\` 的值（如 \`data.result\`）定义了 Java POJO 的嵌套关系。
+    *   对于 \`data.result\`，生成器会创建一个最外层的响应类，该类包含一个名为 \`data\` 的字段。
+    *   \`data\` 字段的类型是另一个生成的 POJO，这个 POJO 内部则包含一个名为 \`result\` 的字段。
+    *   \`result\` 字段的类型由其 schema 决定。
 
-**核心规则**:
-
-1.  **路径解析**: \`backendName\` 的值（如 \`data.result\`）被解析为一个路径。路径的每一部分都代表一个嵌套的 Java POJO 字段。
-2.  **POJO 结构生成**: 代码生成器需要根据这个路径创建相应的 POJO 结构。
-    *   对于 \`data.result\`，最外层的 POJO 会包含一个名为 \`data\` 的字段。
-    *   这个 \`data\` 字段的类型是另一个 POJO，该 POJO 内部包含一个名为 \`result\` 的字段。
-3.  **方法返回类型**: 最终生成的方法的返回类型，是路径最深处字段的类型。在 \`data.result\` 的例子中，方法的返回类型就是 \`result\` 字段对应的 Java 类型。
+2.  **方法返回类型**: 生成的方法的返回类型是最外层的响应类，以完整地反映后端返回的结构。
 
 #### 示例
 
@@ -562,23 +560,39 @@ export function getSchemaToCodeRules(): string {
 
 *   **生成逻辑与代码**:
 
-    1.  **路径解析**: 生成器识别出 \`backendName\` 为 \`data.result\`，因此需要解包。
-    2.  **目标 Schema 定位**: 解包路径的终点是 \`result\` 字段，其 schema 引用了 \`#/components/schemas/UserInfo\`。
-    3.  **POJO 生成**: 根据 \`UserInfo\` 的 schema，生成对应的 \`UserInfo.java\` 类。
-        \`\`\`java
-        public class UserInfo {
-            private String userId;
-            private String userName;
-            // getters and setters
-        }
-        \`\`\`
-    4.  **方法签名生成**: 最终，服务方法的返回类型被确定为解包后的目标类型 \`UserInfo\`。
-        \`\`\`java
-        public interface DemoService {
-            // 返回类型被解包为最内层的 UserInfo 对象
-            UserInfo someMethod(...);
-        }
-        \`\`\`
+    1.  **识别嵌套结构**: \`backendName\` 是 \`data.result\`，表明响应是嵌套的。
+    2.  **生成内部 POJO**: 首先，根据 \`components/schemas/UserInfo\` 生成 \`UserInfo\` 类。
+    3.  **生成包装 POJO**: 接着，根据嵌套路径 \`data.result\` 生成包装类。一个类将包含 \`result\` 字段，另一个类将包含 \`data\` 字段。
+    4.  **确定方法签名**: 服务方法的返回类型是代表整个响应结构的最外层 POJO。
+
+*   **生成的 Java 代码**:
+
+    \`\`\`java
+    // 1. 根据 components/schemas/UserInfo 生成 POJO
+    public class UserInfo {
+        private String userId;
+        private String userName;
+        // getters and setters
+    }
+
+    // 2. 为嵌套结构生成包装类
+    public class DataWrapper {
+        private UserInfo result;
+        // getters and setters
+    }
+
+    public class ApiResponse {
+        private boolean success;
+        private DataWrapper data;
+        // getters and setters
+    }
+
+    // 3. 生成 HSF 接口
+    public interface DemoService {
+        // 返回类型是代表完整响应结构的顶层 ApiResponse 对象
+        ApiResponse someMethod(...);
+    }
+    \`\`\`
 
 ## Controller生成逻辑
 
@@ -708,6 +722,7 @@ Schema 中没有直接提供方法名。可以根据 HTTP 方法和路径生成�
 | \`array\` | (无) | \`java.util.List<T>\` | \`T\` 是通过递归解析 \`items\` 字段的 Schema 生成的类型。 |
 | \`object\` | (无) | \`java.util.Map<String, V>\` 或 **POJO** | 如果存在 \`properties\`，则生成一个 POJO 类。如果存在 \`additionalProperties\`，则生成一个 Map，其中 \`V\` 是递归解析 \`additionalProperties\` 的 Schema 生成的类型。 |
 | \`file\` | (无) | \`org.springframework.web.multipart.MultipartFile\` | 仅适用于 HTTP \`formData\` 请求。 |
+
   `.trim();
 
 }
