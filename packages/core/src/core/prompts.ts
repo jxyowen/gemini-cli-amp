@@ -423,6 +423,10 @@ export function getSchemaToCodeRules(): string {
 
 生成Pojo类时，优先使用lombok注解，如果lombok不存在，则使用getter/setter。为了避免和lombok冲突，避免使用Data作为类名
 
+## 生成代码复用原则
+
+优先学习参考代码中已存在的逻辑复用，比如工具类的使用、注解的使用
+
 ## HSF/Dubbo生成逻辑
 
 ### 整体生成逻辑概述
