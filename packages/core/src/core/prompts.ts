@@ -6,6 +6,7 @@
 
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { LSTool } from '../tools/ls.js';
 import { EditTool } from '../tools/edit.js';
 import { GlobTool } from '../tools/glob.js';
@@ -35,15 +36,24 @@ export function getCoreSystemPrompt(userMemory?: string): string {
   // default path is .gemini/system.md but can be modified via custom path in GEMINI_SYSTEM_MD
   let systemMdEnabled = false;
   let systemMdPath = path.resolve(path.join(GEMINI_CONFIG_DIR, 'system.md'));
-  const systemMdVar = process.env.GEMINI_SYSTEM_MD?.toLowerCase();
-  if (systemMdVar && !['0', 'false'].includes(systemMdVar)) {
-    systemMdEnabled = true; // enable system prompt override
-    if (!['1', 'true'].includes(systemMdVar)) {
-      systemMdPath = path.resolve(systemMdVar); // use custom path from GEMINI_SYSTEM_MD
-    }
-    // require file to exist when override is enabled
-    if (!fs.existsSync(systemMdPath)) {
-      throw new Error(`missing system prompt file '${systemMdPath}'`);
+  const systemMdVar = process.env.GEMINI_SYSTEM_MD;
+  if (systemMdVar) {
+    const systemMdVarLower = systemMdVar.toLowerCase();
+    if (!['0', 'false'].includes(systemMdVarLower)) {
+      systemMdEnabled = true; // enable system prompt override
+      if (!['1', 'true'].includes(systemMdVarLower)) {
+        let customPath = systemMdVar;
+        if (customPath.startsWith('~/')) {
+          customPath = path.join(os.homedir(), customPath.slice(2));
+        } else if (customPath === '~') {
+          customPath = os.homedir();
+        }
+        systemMdPath = path.resolve(customPath); // use custom path from GEMINI_SYSTEM_MD
+      }
+      // require file to exist when override is enabled
+      if (!fs.existsSync(systemMdPath)) {
+        throw new Error(`missing system prompt file '${systemMdPath}'`);
+      }
     }
   }
   const basePrompt = systemMdEnabled
@@ -183,8 +193,8 @@ ${(function () {
 
   if (isSandboxExec) {
     return `
-# MacOS Seatbelt
-You are running under macos seatbelt with limited access to files outside the project directory or system temp directory, and with limited access to host system resources such as ports. If you encounter failures that could be due to MacOS Seatbelt (e.g. if a command fails with 'Operation not permitted' or similar error), as you report the error to the user, also explain why you think it could be due to MacOS Seatbelt, and how the user may need to adjust their Seatbelt profile.
+# macOS Seatbelt
+You are running under macos seatbelt with limited access to files outside the project directory or system temp directory, and with limited access to host system resources such as ports. If you encounter failures that could be due to macOS Seatbelt (e.g. if a command fails with 'Operation not permitted' or similar error), as you report the error to the user, also explain why you think it could be due to macOS Seatbelt, and how the user may need to adjust their Seatbelt profile.
 `;
   } else if (isGenericSandbox) {
     return `
@@ -323,12 +333,24 @@ Your core function is efficient and safe assistance. Balance extreme conciseness
 `.trim();
 
   // if GEMINI_WRITE_SYSTEM_MD is set (and not 0|false), write base system prompt to file
-  const writeSystemMdVar = process.env.GEMINI_WRITE_SYSTEM_MD?.toLowerCase();
-  if (writeSystemMdVar && !['0', 'false'].includes(writeSystemMdVar)) {
-    if (['1', 'true'].includes(writeSystemMdVar)) {
-      fs.writeFileSync(systemMdPath, basePrompt); // write to default path, can be modified via GEMINI_SYSTEM_MD
-    } else {
-      fs.writeFileSync(path.resolve(writeSystemMdVar), basePrompt); // write to custom path from GEMINI_WRITE_SYSTEM_MD
+  const writeSystemMdVar = process.env.GEMINI_WRITE_SYSTEM_MD;
+  if (writeSystemMdVar) {
+    const writeSystemMdVarLower = writeSystemMdVar.toLowerCase();
+    if (!['0', 'false'].includes(writeSystemMdVarLower)) {
+      if (['1', 'true'].includes(writeSystemMdVarLower)) {
+        fs.mkdirSync(path.dirname(systemMdPath), { recursive: true });
+        fs.writeFileSync(systemMdPath, basePrompt); // write to default path, can be modified via GEMINI_SYSTEM_MD
+      } else {
+        let customPath = writeSystemMdVar;
+        if (customPath.startsWith('~/')) {
+          customPath = path.join(os.homedir(), customPath.slice(2));
+        } else if (customPath === '~') {
+          customPath = os.homedir();
+        }
+        const resolvedPath = path.resolve(customPath);
+        fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
+        fs.writeFileSync(resolvedPath, basePrompt); // write to custom path from GEMINI_WRITE_SYSTEM_MD
+      }
     }
   }
 
@@ -410,7 +432,7 @@ export function getSchemaToCodeRules(): string {
 
   return `
   
-  # Schema to Java Generation Rules
+# Schema to Java Generation Rules
 
 ## 核心协议识别逻辑
 
@@ -425,7 +447,7 @@ export function getSchemaToCodeRules(): string {
 
 ## 生成代码复用原则
 
-优先学习参考代码中已存在的逻辑复用，比如工具类的使用、注解的使用
+优先学习参考代码中已存在的逻辑复用，比如工具类的使用、注解的使用及import包的路径
 
 ## HSF/Dubbo生成逻辑
 
