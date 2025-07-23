@@ -419,6 +419,10 @@ export function getSchemaToCodeRules(): string {
 *   **\`backendService.protocol\` = \`HSF\` 或 \`DUBBO\`**: 生成一个 Java **接口 (interface)**，遵循 RPC 开发模式。
 *   **\`backendService.protocol\` = \`HTTP\`**: 生成一个 Java **类 (class)**，并使用 Spring Web 注解（如 \`@RestController\`, \`@RequestMapping\` 等）来构建一个 Controller。
 
+## Pojo 生成逻辑
+
+生成Pojo类时，优先使用lombok注解，如果lombok不存在，则使用getter/setter。为了避免和lombok冲突，避免使用Data作为类名
+
 ## HSF/Dubbo生成逻辑
 
 ### 整体生成逻辑概述
@@ -576,14 +580,14 @@ export function getSchemaToCodeRules(): string {
     }
 
     // 2. 为嵌套结构生成包装类
-    public class DataWrapper {
+    public class Wrapper {
         private UserInfo result;
         // getters and setters
     }
 
     public class ApiResponse {
         private boolean success;
-        private DataWrapper data;
+        private Wrapper data;
         // getters and setters
     }
 
