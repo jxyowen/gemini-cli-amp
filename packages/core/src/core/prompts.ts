@@ -432,6 +432,7 @@ The structure MUST be as follows:
 export function getSchemaToCodeRules(): string {
 
   return `
+  
   # Schema to Java Generation Rules
 
 ## 核心协议识别逻辑
@@ -670,7 +671,6 @@ Schema 中没有直接提供方法名。可以根据 HTTP 方法和路径生成�
 *   \`in: "formData"\` -> 如果是文件上传 (\`type: "file"\`)，则生成 \`MultipartFile\` 类型的参数。否则，生成带 \`@RequestParam\` 的参数。
 
 *   **参数注解**: 对于 Controller，\`@PathVariable("id")\`, \`@RequestParam("version")\` 等注解的值，应该使用 Schema 参数中的 \`name\` 字段。
-*   **@JsonProperty**: 对于 Controller，如果POJO中的字段名和json中的key不一致，则需要添加 \`@JsonProperty("user_age")\` 这样的注解来处理名称映射。这确保了 Java 代码遵循其自身的命名规范（如驼峰式），同时能正确接收来自前端的、不同命名规范的参数。
 
 
 #### 示例
@@ -704,18 +704,7 @@ Schema 中没有直接提供方法名。可以根据 HTTP 方法和路径生成�
         }
     }
     \`\`\`
-
-*   **@JsonProperty示例**:
-
-    \`\`\`java
-    public class UserDTO {
-        @JsonProperty("user_name")
-        private String userName;
-        private int age;
-        // getters and setters
-    }
-    \`\`\`
-
+    
 ### 出参生成生成逻辑
 
 与 HSF 规则相同，通过解析 \`responses.200.schema\` 生成。对于 Spring，可以考虑生成 \`ResponseEntity<T>\` 来提供更灵活的 HTTP 响应控制。
@@ -763,7 +752,7 @@ Schema 中没有直接提供方法名。可以根据 HTTP 方法和路径生成�
 | \`array\` | (无) | \`java.util.List<T>\` | \`T\` 是通过递归解析 \`items\` 字段的 Schema 生成的类型。 |
 | \`object\` | (无) | \`java.util.Map<String, V>\` 或 **POJO** | 如果存在 \`properties\`，则生成一个 POJO 类。如果存在 \`additionalProperties\`，则生成一个 Map，其中 \`V\` 是递归解析 \`additionalProperties\` 的 Schema 生成的类型。 |
 | \`file\` | (无) | \`org.springframework.web.multipart.MultipartFile\` | 仅适用于 HTTP \`formData\` 请求。 |
-  
+
   `.trim();
 
 }
