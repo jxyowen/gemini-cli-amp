@@ -447,7 +447,7 @@ export function getSchemaToCodeRules(): string {
 
 ## 生成代码复用原则
 
-优先学习参考代码中已存在的逻辑复用，比如工具类的使用、注解的使用及import包的路径
+优先学习参考代码中已存在的逻辑复用，比如工具类的使用、注解的使用及import包的路径(如@HSFProvider)
 
 ## HSF/Dubbo生成逻辑
 
